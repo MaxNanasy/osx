@@ -106,7 +106,8 @@ dwarf_expr_fetch (struct dwarf_expr_context *ctx, int n)
 }
 
 /* Add a new piece to CTX's piece list.  */
-static void
+/* APPLE LOCAL variable initialized status  */
+void
 add_piece (struct dwarf_expr_context *ctx,
            int in_reg, CORE_ADDR value, ULONGEST size)
 {
@@ -213,7 +214,8 @@ dwarf2_read_address (gdb_byte *buf, gdb_byte *buf_end, int *bytes_read)
 
 /* Return the type of an address, for unsigned arithmetic.  */
 
-static struct type *
+/* APPLE LOCAL variable initialized status.  */
+struct type *
 unsigned_address_type (void)
 {
   switch (TARGET_ADDR_BIT / TARGET_CHAR_BIT)
@@ -232,7 +234,8 @@ unsigned_address_type (void)
 
 /* Return the type of an address, for signed arithmetic.  */
 
-static struct type *
+/* APPLE LOCAL variable initialized status  */
+struct type *
 signed_address_type (void)
 {
   switch (TARGET_ADDR_BIT / TARGET_CHAR_BIT)
@@ -257,6 +260,8 @@ execute_stack_op (struct dwarf_expr_context *ctx,
 		  gdb_byte *op_ptr, gdb_byte *op_end)
 {
   ctx->in_reg = 0;
+  /* APPLE LOCAL variable initialized status.  */
+  ctx->var_status = 1;  /* Default is initialized.  */
 
   while (op_ptr < op_end)
     {
@@ -383,7 +388,11 @@ execute_stack_op (struct dwarf_expr_context *ctx,
 	case DW_OP_reg29:
 	case DW_OP_reg30:
 	case DW_OP_reg31:
-	  if (op_ptr != op_end && *op_ptr != DW_OP_piece)
+	  /* APPLE LOCAL begin variable initialized status  */
+	  if (op_ptr != op_end 
+	      && *op_ptr != DW_OP_piece 
+	      && *op_ptr != DW_OP_APPLE_uninit)
+	  /* APPLE LOCAL end variable initialized status  */
 	    error (_("DWARF-2 expression error: DW_OP_reg operations must be "
 		   "used either alone or in conjuction with DW_OP_piece."));
 
@@ -394,7 +403,11 @@ execute_stack_op (struct dwarf_expr_context *ctx,
 
 	case DW_OP_regx:
 	  op_ptr = read_uleb128 (op_ptr, op_end, &reg);
-	  if (op_ptr != op_end && *op_ptr != DW_OP_piece)
+	  /* APPLE LOCAL begin variable initialized status  */
+	  if (op_ptr != op_end 
+	      && *op_ptr != DW_OP_piece
+	      && *op_ptr != DW_OP_APPLE_uninit)
+	  /* APPLE LOCAL end variable initialized status  */
 	    error (_("DWARF-2 expression error: DW_OP_reg operations must be "
 		   "used either alone or in conjuction with DW_OP_piece."));
 
@@ -559,6 +572,10 @@ execute_stack_op (struct dwarf_expr_context *ctx,
 	      op_ptr = read_uleb128 (op_ptr, op_end, &reg);
 	      result += reg;
 	      break;
+	      /* APPLE LOCAL begin eliminate warning about incomplete switch stmt */
+	    default:
+	      break;
+	      /* APPLE LOCAL end eliminate warning... */
 	    }
 	  break;
 
@@ -693,6 +710,41 @@ execute_stack_op (struct dwarf_expr_context *ctx,
             ULONGEST size;
             CORE_ADDR addr_or_regnum;
 
+            /* APPLE LOCAL: DW_OP_piece requires that a register or address
+               be pushed on the stack.  The dwarf_expr_pop () call below will 
+               error() if the stack doesn't have something there.
+               (NB: The standard allows for a DW_OP_piece operator with NO
+                location specified -- this would indicate a variable which
+                has been partially optimized away by the compiler.  gcc does
+                not emit these today.)
+
+	       gcc-4.0 is generating bad expressions for 64-bit
+	       variables in 32-bit programs when location lists are
+	       being used.  These bad expressions follow a very
+	       regular pattern - they have two DW_OP_piece operators
+	       showing the low/high 4-bytes of the 8-byte data,
+	       then they have a DW_OP_piece with no address/register
+	       specified, then they have another one or two DW_OP_piece
+	       operators specifying additional data.  Here is an example:
+
+         TAG_variable [31]  
+          AT_name( "loffset" )
+          AT_decl_file( 0x01 )
+          AT_decl_line( 0x75 )
+          AT_type( {0x00055936} ( uint64_t ) )
+          AT_location( 0x00019b4c
+             0x0003acb8 - 0x0003ad58: reg20, piece 0x0004, reg21, piece 0x0004
+             0x0003ad58 - 0x0003b050: reg20, piece 0x0004, reg21, piece 0x0004, piece 0x0008, reg21 , piece 0x0004
+             0x0003b050 - 0x0003b118: reg20, piece 0x0004, reg21, piece 0x0004 )
+
+               As a hack, instead of error()ing out here, we will recgonize 
+               that we're facing this broken debug info from the compiler
+               and stop evaluating this expression at this point.  We've
+               already retrieved the full variable location by now.  */
+
+            if (ctx->stack_len == 0)
+              return;
+
             /* Record the piece.  */
             op_ptr = read_uleb128 (op_ptr, op_end, &size);
             addr_or_regnum = dwarf_expr_fetch (ctx, 0);
@@ -703,6 +755,12 @@ execute_stack_op (struct dwarf_expr_context *ctx,
             ctx->in_reg = 0;
           }
           goto no_push;
+
+	/* APPLE LOCAL begin variable initialized status  */
+	case DW_OP_APPLE_uninit:
+	  ctx->var_status = 0;
+	  goto no_push;
+	/* APPLE LOCAL end variable initialized status  */
 
 	default:
 	  error (_("Unhandled dwarf expression opcode 0x%x"), op);

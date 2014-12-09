@@ -2076,7 +2076,15 @@ rs6000_stab_reg_to_regnum (int num)
 
 
 /* Convert a Dwarf 2 register number to a GDB register number.  */
-static int
+/* APPLE LOCAL: Make function global so ppc-macosx-tdep.c can refer to it.  */
+
+/* APPLE LOCAL: These register mappings are defined in pages
+   3-46 through 3-48 of
+	http://refspecs.freestandards.org/elf/elfspec_ppc.pdf
+   The altivec regnos are defined in section 3.7 of
+	http://www.freescale.com/files/32bit/doc/ref_manual/ALTIVECPIM.pdf */
+
+int
 rs6000_dwarf2_reg_to_regnum (int num)
 {
   struct gdbarch_tdep *tdep = gdbarch_tdep (current_gdbarch);
@@ -2092,6 +2100,20 @@ rs6000_dwarf2_reg_to_regnum (int num)
     return tdep->ppc_vr0_regnum + (num - 1124);
   else if (1200 <= num && num < 1200 + 32)
     return tdep->ppc_ev0_regnum + (num - 1200);
+  /* APPLE LOCAL FIXME: Hack to work around gcc outputting altivec registers
+     at its internal register numbering offset (77) instead of the DWARF
+     register numbering offset (1124) -- with exceptions for registers in
+     that range which have assigned meanings by the ABI spec.  
+     Technically the range 70-85 are the segment registers (SR0-SR15)
+     but gdb already didn't recognize those so it should be safe to override
+     them temporarily.  */
+  else if (77 <= num && num < 77 + 32
+           && num != 99
+           && num != 100
+           && num != 101
+           && num != 108
+           && num != 109)
+    return tdep->ppc_vr0_regnum + (num - 77);
   else
     switch (num)
       {
@@ -2112,6 +2134,10 @@ rs6000_dwarf2_reg_to_regnum (int num)
       case 612:
         return tdep->ppc_spefscr_regnum;
       default:
+      /* APPLE LOCAL: Don't just ingest an unrecognized register
+         number in the hopes that it might be correctly understood.
+         Let the user know something is wrong with the debug info.  */
+        warning ("Unrecognized DWARF register number %d", num);
         return num;
       }
 }
@@ -2958,7 +2984,8 @@ rs6000_frame_this_id (struct frame_info *next_frame, void **this_cache,
 static void
 rs6000_frame_prev_register (struct frame_info *next_frame,
 				 void **this_cache,
-				 int regnum, int *optimizedp,
+			         /* APPLE LOCAL variable opt states.  */
+				 int regnum, enum opt_state *optimizedp,
 				 enum lval_type *lvalp, CORE_ADDR *addrp,
 				 int *realnump, gdb_byte *valuep)
 {

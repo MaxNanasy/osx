@@ -40,7 +40,6 @@
 #define bfd_mach_o_generic_stat_arch_elt              _bfd_noarchive_generic_stat_arch_elt
 #define bfd_mach_o_update_armap_timestamp             _bfd_noarchive_update_armap_timestamp
 #define bfd_mach_o_close_and_cleanup                  _bfd_generic_close_and_cleanup
-#define bfd_mach_o_bfd_free_cached_info               _bfd_generic_bfd_free_cached_info
 #define bfd_mach_o_new_section_hook                   _bfd_generic_new_section_hook
 #define bfd_mach_o_get_section_contents_in_window     _bfd_generic_get_section_contents_in_window
 #define bfd_mach_o_get_section_contents_in_window_with_mode _bfd_generic_get_section_contents_in_window_with_mode
@@ -118,6 +117,22 @@ bfd_mach_o_version (abfd)
 
   return mdata->header.version;
 }
+
+/* APPLE LOCAL shared cache begin
+   If a mach image is in the shared cache is being read straight from memory
+   or from the shared cache file itself, the msbit of FLAGS will be set to
+   1.  */
+bfd_boolean
+bfd_mach_o_in_shared_cached_memory (bfd *abfd)
+{
+  bfd_mach_o_data_struct *mdata = NULL;
+  BFD_ASSERT (bfd_mach_o_valid (abfd));
+  mdata = abfd->tdata.mach_o_data;
+  if (mdata->header.flags & 0x80000000)
+    return 1;
+  return 0;
+}
+/* APPLE LOCAL shared cache end  */
 
 bfd_boolean
 bfd_mach_o_valid (bfd *abfd)
@@ -881,6 +896,7 @@ bfd_mach_o_write_contents (bfd *abfd)
 	case BFD_MACH_O_LC_DYSYMTAB:
 	case BFD_MACH_O_LC_LOAD_DYLIB:
 	case BFD_MACH_O_LC_LOAD_WEAK_DYLIB:
+	case BFD_MACH_O_LC_REEXPORT_DYLIB:
 	case BFD_MACH_O_LC_ID_DYLIB:
 	case BFD_MACH_O_LC_LOAD_DYLINKER:
 	case BFD_MACH_O_LC_ID_DYLINKER:
@@ -1012,9 +1028,12 @@ bfd_mach_o_make_bfd_section (bfd *abfd, bfd_mach_o_section *section)
   bfdsec->size = section->size;
   bfdsec->filepos = section->offset;
   bfdsec->alignment_power = section->align;
+  bfdsec->segment_mark = 0;
 
   if (section->flags & (BFD_MACH_O_S_ZEROFILL | BFD_MACH_O_S_GB_ZEROFILL))
     bfdsec->flags = SEC_ALLOC;
+  else if (section->flags & BFD_MACH_O_S_ATTR_DEBUG || strcmp (section->segname, "__DWARF") == 0)
+    bfdsec->flags = SEC_HAS_CONTENTS;
   else
     bfdsec->flags = SEC_HAS_CONTENTS | SEC_LOAD | SEC_ALLOC | SEC_CODE;
 
@@ -1308,39 +1327,118 @@ bfd_mach_o_scan_read_dysymtab_symbol (bfd *abfd,
   return bfd_mach_o_scan_read_symtab_symbol (abfd, sym, s, symindex);
 }
 
+#define i386_THREAD_STATE_STR	  "i386_THREAD_STATE"
+#define i386_FLOAT_STATE_STR	  "i386_FLOAT_STATE"
+#define i386_EXCEPTION_STATE_STR  "i386_EXCEPTION_STATE"
+#define x86_THREAD_STATE64_STR	  "x86_THREAD_STATE64"
+#define x86_FLOAT_STATE64_STR	  "x86_FLOAT_STATE64"
+#define x86_EXCEPTION_STATE64_STR "x86_EXCEPTION_STATE64"
+#define x86_THREAD_STATE_STR	  "x86_THREAD_STATE"
+#define x86_FLOAT_STATE_STR	  "x86_FLOAT_STATE"
+#define x86_EXCEPTION_STATE_STR   "x86_EXCEPTION_STATE"
+
 static const char *
 bfd_mach_o_i386_flavour_string (unsigned int flavour)
 {
   switch ((int) flavour)
     {
-    case BFD_MACH_O_i386_THREAD_STATE: return "i386_THREAD_STATE";
-    case BFD_MACH_O_i386_FLOAT_STATE: return "i386_FLOAT_STATE";
-    case BFD_MACH_O_i386_EXCEPTION_STATE: return "i386_EXCEPTION_STATE";
+    case BFD_MACH_O_i386_THREAD_STATE: return i386_THREAD_STATE_STR;
+    case BFD_MACH_O_i386_FLOAT_STATE: return i386_FLOAT_STATE_STR;
+    case BFD_MACH_O_i386_EXCEPTION_STATE: return i386_EXCEPTION_STATE_STR;
     /* APPLE LOCAL begin x86_64 */
-    case BFD_MACH_O_x86_THREAD_STATE64: return "x86_THREAD_STATE64";
-    case BFD_MACH_O_x86_FLOAT_STATE64: return "x86_FLOAT_STATE64";
-    case BFD_MACH_O_x86_EXCEPTION_STATE64: return "x86_EXCEPTION_STATE64";
-    case BFD_MACH_O_x86_THREAD_STATE: return "x86_THREAD_STATE";
-    case BFD_MACH_O_x86_FLOAT_STATE: return "x86_FLOAT_STATE";
-    case BFD_MACH_O_x86_EXCEPTION_STATE: return "x86_EXCEPTION_STATE";
+    case BFD_MACH_O_x86_THREAD_STATE64: return x86_THREAD_STATE64_STR;
+    case BFD_MACH_O_x86_FLOAT_STATE64: return x86_FLOAT_STATE64_STR;
+    case BFD_MACH_O_x86_EXCEPTION_STATE64: return x86_EXCEPTION_STATE64_STR;
+    case BFD_MACH_O_x86_THREAD_STATE: return x86_THREAD_STATE_STR;
+    case BFD_MACH_O_x86_FLOAT_STATE: return x86_FLOAT_STATE_STR;
+    case BFD_MACH_O_x86_EXCEPTION_STATE: return x86_EXCEPTION_STATE_STR;
     /* APPLE LOCAL end x86_64 */
     case BFD_MACH_O_i386_THREAD_STATE_NONE: return "THREAD_STATE_NONE";
     default: return "UNKNOWN";
     }
 }
+static unsigned int
+bfd_mach_o_i386_flavour_from_string (const char * s)
+{
+  if (strcmp(s, i386_THREAD_STATE_STR) == 0)
+    return BFD_MACH_O_i386_THREAD_STATE;
+  else if (strcmp(s, i386_FLOAT_STATE_STR) == 0)
+    return BFD_MACH_O_i386_FLOAT_STATE;
+  else if (strcmp(s, i386_EXCEPTION_STATE_STR) == 0)
+    return BFD_MACH_O_i386_EXCEPTION_STATE;
+  else if (strcmp(s, x86_THREAD_STATE64_STR) == 0)
+    return BFD_MACH_O_x86_THREAD_STATE64;
+  else if (strcmp(s, x86_FLOAT_STATE64_STR) == 0)
+    return BFD_MACH_O_x86_FLOAT_STATE64;
+  else if (strcmp(s, x86_EXCEPTION_STATE64_STR) == 0)
+    return BFD_MACH_O_x86_EXCEPTION_STATE64;
+  else if (strcmp(s, x86_THREAD_STATE_STR) == 0)
+    return BFD_MACH_O_x86_THREAD_STATE;
+  else if (strcmp(s, x86_FLOAT_STATE_STR) == 0)
+    return BFD_MACH_O_x86_FLOAT_STATE;
+  else if (strcmp(s, x86_EXCEPTION_STATE_STR) == 0)
+    return BFD_MACH_O_x86_EXCEPTION_STATE;
+  return 0;
+}
 
+#define PPC_THREAD_STATE_STR	"PPC_THREAD_STATE"
+#define PPC_FLOAT_STATE_STR	"PPC_FLOAT_STATE"
+#define PPC_EXCEPTION_STATE_STR	"PPC_EXCEPTION_STATE"
+#define PPC_VECTOR_STATE_STR	"PPC_VECTOR_STATE"
+#define PPC_THREAD_STATE_64_STR	"PPC_THREAD_STATE_64"
 static const char *
 bfd_mach_o_ppc_flavour_string (unsigned int flavour)
 {
   switch ((int) flavour)
     {
-    case BFD_MACH_O_PPC_THREAD_STATE: return "PPC_THREAD_STATE";
-    case BFD_MACH_O_PPC_FLOAT_STATE: return "PPC_FLOAT_STATE";
-    case BFD_MACH_O_PPC_EXCEPTION_STATE: return "PPC_EXCEPTION_STATE";
-    case BFD_MACH_O_PPC_VECTOR_STATE: return "PPC_VECTOR_STATE";
+    case BFD_MACH_O_PPC_THREAD_STATE: return PPC_THREAD_STATE_STR;
+    case BFD_MACH_O_PPC_FLOAT_STATE: return PPC_FLOAT_STATE_STR;
+    case BFD_MACH_O_PPC_EXCEPTION_STATE: return PPC_EXCEPTION_STATE_STR;
+    case BFD_MACH_O_PPC_VECTOR_STATE: return PPC_VECTOR_STATE_STR;
+    case BFD_MACH_O_PPC_THREAD_STATE_64: return PPC_THREAD_STATE_64_STR;
     default: return "UNKNOWN";
     }
 }
+
+static unsigned int
+bfd_mach_o_ppc_flavour_from_string (const char* s)
+{
+  if (strcmp(s, PPC_THREAD_STATE_STR) == 0)
+    return BFD_MACH_O_PPC_THREAD_STATE;
+  else if (strcmp(s, PPC_FLOAT_STATE_STR) == 0)
+    return BFD_MACH_O_PPC_FLOAT_STATE;
+  else if (strcmp(s, PPC_EXCEPTION_STATE_STR) == 0)
+    return BFD_MACH_O_PPC_EXCEPTION_STATE;
+  else if (strcmp(s, PPC_VECTOR_STATE_STR) == 0)
+    return BFD_MACH_O_PPC_VECTOR_STATE;
+  else if (strcmp(s, PPC_THREAD_STATE_64_STR) == 0)
+    return BFD_MACH_O_PPC_THREAD_STATE_64;
+  return 0;
+}
+
+unsigned int
+bfd_mach_o_flavour_from_string(unsigned long cputype, const char* s)
+{
+  unsigned int flavour = 0;
+  if (s)
+    {
+      switch (cputype)
+	{
+	case BFD_MACH_O_CPU_TYPE_POWERPC:
+	case BFD_MACH_O_CPU_TYPE_POWERPC_64:
+	  flavour = bfd_mach_o_ppc_flavour_from_string (s);
+	  break;
+	case BFD_MACH_O_CPU_TYPE_I386:
+	case BFD_MACH_O_CPU_TYPE_X86_64:
+	  flavour = bfd_mach_o_i386_flavour_from_string (s);
+	  break;
+	default:
+	  break;
+	}
+    }
+  return flavour;
+}
+
 
 static int
 bfd_mach_o_scan_read_dylinker (bfd *abfd,
@@ -1405,6 +1503,7 @@ bfd_mach_o_scan_read_dylib (bfd *abfd, bfd_mach_o_load_command *command)
 
   BFD_ASSERT ((command->type == BFD_MACH_O_LC_ID_DYLIB)
 	      || (command->type == BFD_MACH_O_LC_LOAD_DYLIB)
+	      || (command->type == BFD_MACH_O_LC_REEXPORT_DYLIB)
 	      || (command->type == BFD_MACH_O_LC_LOAD_WEAK_DYLIB));
 
   bfd_seek (abfd, command->offset + 8, SEEK_SET);
@@ -1423,6 +1522,8 @@ bfd_mach_o_scan_read_dylib (bfd *abfd, bfd_mach_o_load_command *command)
     prefix = "LC_LOAD_DYLIB";
   else if (command->type == BFD_MACH_O_LC_LOAD_WEAK_DYLIB)
     prefix = "LC_LOAD_WEAK_DYLIB";
+  else if (command->type == BFD_MACH_O_LC_REEXPORT_DYLIB)
+    prefix = "LC_REEXPORT_DYLIB";
   else if (command->type == BFD_MACH_O_LC_ID_DYLIB)
     prefix = "LC_ID_DYLIB";
   else
@@ -1532,9 +1633,11 @@ bfd_mach_o_scan_read_thread (bfd *abfd, bfd_mach_o_load_command *command)
       switch (mdata->header.cputype)
 	{
 	case BFD_MACH_O_CPU_TYPE_POWERPC:
+	case BFD_MACH_O_CPU_TYPE_POWERPC_64:
 	  flavourstr = bfd_mach_o_ppc_flavour_string (cmd->flavours[i].flavour);
 	  break;
 	case BFD_MACH_O_CPU_TYPE_I386:
+	case BFD_MACH_O_CPU_TYPE_X86_64:
 	  flavourstr = bfd_mach_o_i386_flavour_string (cmd->flavours[i].flavour);
 	  break;
 	default:
@@ -1580,6 +1683,9 @@ bfd_mach_o_scan_read_dysymtab (bfd *abfd, bfd_mach_o_load_command *command)
   struct bfd_section *stabs_pseudo_section;
   asection *bfdsec;
   int nlist_size;
+  bfd_boolean in_mem_shared_cache;
+  
+  in_mem_shared_cache = bfd_mach_o_in_shared_cached_memory (abfd);
 
   BFD_ASSERT (command->type == BFD_MACH_O_LC_DYSYMTAB);
 
@@ -1619,19 +1725,35 @@ bfd_mach_o_scan_read_dysymtab (bfd *abfd, bfd_mach_o_load_command *command)
      This is especially useful if we want to minimize the amount of
      minsyms we create initially.  */
 
-  /* First, check that our assumption about the ordering is correct.
-     ilocalsym should always be less than (come before) 
-     iextdefsym and iundefsym.  */
+  /* APPLE LOCAL shared cache
+     If we are parsing an in memory mach image that is in the shared
+     cache, we need not check for continuity in the dysymtab load commands
+     since we know they aren't contiguous. These kinds of mach images all 
+     share one big symbol and string table, and the dysymtab load command 
+     tells which symbols belong to each image. We create a 
+     "LC_DYSYMTAB.localstabs" for these files that won't get used,
+     will contain no entries, or one bogus entry created by dyld. We also
+     create a "LC_DYSYMTAB.nonlocalstabs" section that contains all of the 
+     extdef symbols. If we need to parse the undef symbols, we may need to
+     create a "LC_DYSYMTAB.undefstabs" section that we can check for since
+     items in the shared cache do not have contiguous EXTDEF and UNDEF 
+     symbols.  */
+     
+  if (in_mem_shared_cache == 0)
+    {
+      /* First, check that our assumption about the ordering is correct.
+	 ilocalsym should always be less than (come before) 
+	 iextdefsym and iundefsym.  */
+      if (seg->ilocalsym >= seg->iextdefsym || seg->ilocalsym >= seg->iundefsym)
+	return 0;
 
-  if (seg->ilocalsym >= seg->iextdefsym || seg->ilocalsym >= seg->iundefsym)
-    return 0;
+      /* Check that the three types - local, external, undefined - are contiguous
+	 and start at offset 0 like they're supposed to. */
 
-  /* Check that the three types - local, external, undefined - are contiguous
-     and start at offset 0 like they're supposed to. */
-
-  if (seg->ilocalsym != 0 || seg->nlocalsym != seg->iextdefsym ||
-      seg->nlocalsym + seg->nextdefsym != seg->iundefsym)
-    return 0;
+      if (seg->ilocalsym != 0 || seg->nlocalsym != seg->iextdefsym ||
+	  seg->nlocalsym + seg->nextdefsym != seg->iundefsym)
+	return 0;
+    }
 
   /* nlist's are different sizes for 32 bit & 64 bit PPC...  */
 
@@ -1642,42 +1764,69 @@ bfd_mach_o_scan_read_dysymtab (bfd *abfd, bfd_mach_o_load_command *command)
   if (stabs_pseudo_section == NULL)
     return 0;
 
-  prefix = "LC_DYSYMTAB.localstabs";
+  /* APPLE LOCAL shared cache - only create the fake localstabs section if
+     we have some local symbols.  */
+  if (seg->nlocalsym > 0)
+    {
+      prefix = "LC_DYSYMTAB.localstabs";
+      
+      sname = (char *) bfd_alloc (abfd, strlen (prefix) + 1);
+      if (sname == NULL)
+	return -1;
+      strcpy (sname, prefix);
+
+      bfdsec = bfd_make_section_anyway (abfd, sname);
+      if (bfdsec == NULL)
+	return -1;
+
+      bfdsec->vma = 0;
+      bfdsec->lma = 0;
+      bfdsec->size = seg->nlocalsym * nlist_size;
+      bfdsec->filepos = stabs_pseudo_section->filepos + (seg->ilocalsym * nlist_size);
+      bfdsec->alignment_power = 0;
+      bfdsec->flags = SEC_HAS_CONTENTS;
+    }
   
-  sname = (char *) bfd_alloc (abfd, strlen (prefix) + 1);
-  if (sname == NULL)
-    return -1;
-  strcpy (sname, prefix);
+  /* APPLE LOCAL shared cache - only create the fake localstabs section if
+     we have some local symbols.  */
+  if (seg->nextdefsym > 0 || seg->nundefsym > 0)
+    {
+      unsigned long num_nonlocalstabs;
+      if (in_mem_shared_cache)
+	{
+	  /* In the memory based shared cache mach-o images we just want
+	     the EXT symbols since the UNDEF symbols do not immediately 
+	     follow the EXT symbols.  */
+	  num_nonlocalstabs = seg->nextdefsym;
+	}
+      else
+	{
+	  /* For all others the EXT and UNDEF symbols are contiguous.  */
+	  num_nonlocalstabs = seg->nextdefsym + seg->nundefsym;
+	}
 
-  bfdsec = bfd_make_section_anyway (abfd, sname);
-  if (bfdsec == NULL)
-    return -1;
+      if (num_nonlocalstabs > 0)
+	{
+	  prefix = "LC_DYSYMTAB.nonlocalstabs";
+	  
+	  sname = (char *) bfd_alloc (abfd, strlen (prefix) + 1);
+	  if (sname == NULL)
+	    return -1;
+	  strcpy (sname, prefix);
 
-  bfdsec->vma = 0;
-  bfdsec->lma = 0;
-  bfdsec->size = seg->nlocalsym * nlist_size;
-  bfdsec->filepos = stabs_pseudo_section->filepos + (seg->ilocalsym * nlist_size);
-  bfdsec->alignment_power = 0;
-  bfdsec->flags = SEC_HAS_CONTENTS;
+	  bfdsec = bfd_make_section_anyway (abfd, sname);
+	  if (bfdsec == NULL)
+	    return -1;
 
-  prefix = "LC_DYSYMTAB.nonlocalstabs";
-  
-  sname = (char *) bfd_alloc (abfd, strlen (prefix) + 1);
-  if (sname == NULL)
-    return -1;
-  strcpy (sname, prefix);
-
-  bfdsec = bfd_make_section_anyway (abfd, sname);
-  if (bfdsec == NULL)
-    return -1;
-
-  bfdsec->vma = 0;
-  bfdsec->lma = 0;
-  bfdsec->size = (seg->nextdefsym * nlist_size) + (seg->nundefsym * nlist_size);
-  bfdsec->filepos =  stabs_pseudo_section->filepos + (seg->iextdefsym * nlist_size);
-  bfdsec->alignment_power = 0;
-  bfdsec->flags = SEC_HAS_CONTENTS;
-
+	  bfdsec->vma = 0;
+	  bfdsec->lma = 0;
+	  bfdsec->size = (num_nonlocalstabs * nlist_size);
+	  bfdsec->filepos =  stabs_pseudo_section->filepos + 
+			     (seg->iextdefsym * nlist_size);
+	  bfdsec->alignment_power = 0;
+	  bfdsec->flags = SEC_HAS_CONTENTS;
+	}
+    }
   return 0;
 }
 
@@ -1812,6 +1961,7 @@ bfd_mach_o_scan_read_segment (bfd *abfd,
   bfdsec->filepos = seg->fileoff;
   bfdsec->alignment_power = 0x0;
   bfdsec->flags = SEC_HAS_CONTENTS | SEC_LOAD | SEC_ALLOC | SEC_CODE;
+  bfdsec->segment_mark = 1;
 
   seg->segment = bfdsec;
 
@@ -1861,7 +2011,7 @@ bfd_mach_o_scan_read_command (bfd *abfd, bfd_mach_o_load_command *command)
   if (bfd_bread ((PTR) buf, 8, abfd) != 8)
     return -1;
 
-  command->type = (bfd_h_get_32 (abfd, buf) & ~BFD_MACH_O_LC_REQ_DYLD);
+  command->type = (bfd_h_get_32 (abfd, buf));
   command->type_required = (bfd_h_get_32 (abfd, buf) & BFD_MACH_O_LC_REQ_DYLD
 			    ? 1 : 0);
   command->len = bfd_h_get_32 (abfd, buf + 4);
@@ -1895,6 +2045,7 @@ bfd_mach_o_scan_read_command (bfd *abfd, bfd_mach_o_load_command *command)
     case BFD_MACH_O_LC_LOAD_DYLIB:
     case BFD_MACH_O_LC_ID_DYLIB:
     case BFD_MACH_O_LC_LOAD_WEAK_DYLIB:
+    case BFD_MACH_O_LC_REEXPORT_DYLIB:
       if (bfd_mach_o_scan_read_dylib (abfd, command) != 0)
 	return -1;
       break;
@@ -1929,6 +2080,9 @@ bfd_mach_o_scan_read_command (bfd *abfd, bfd_mach_o_load_command *command)
     case BFD_MACH_O_LC_TWOLEVEL_HINTS:
     case BFD_MACH_O_LC_PREBIND_CKSUM:
     case BFD_MACH_O_LC_ROUTINES_64:
+    case BFD_MACH_O_LC_RPATH:
+    case BFD_MACH_O_LC_CODE_SIGNATURE:
+    case BFD_MACH_O_LC_SEGMENT_SPLIT_INFO:
       break;
     default:
       fprintf (stderr, "unable to read unknown load command 0x%lx\n",
@@ -2384,7 +2538,17 @@ bfd_mach_o_openr_next_archived_file (bfd *archive, bfd *prev)
       nbfd->filename = s;
       nbfd->iostream = NULL;
       entry->abfd = nbfd;
+#ifdef BFD_TRACK_OPEN_CLOSE
+  printf ("Opening 0x%lx from FAT archive 0x%lx: \"%s\"\n", (unsigned long) entry->abfd,
+	  (unsigned long) archive, entry->abfd->filename);
+#endif
     }
+#ifdef BFD_TRACK_OPEN_CLOSE
+  else
+    printf ("Opening 0x%lx from FAT archive cache 0x%lx: \"%s\"\n", 
+	    (unsigned long) entry->abfd,
+	    (unsigned long) archive, entry->abfd->filename);
+#endif
 
   return entry->abfd;
 }
@@ -2671,6 +2835,46 @@ bfd_mach_o_get_uuid (bfd *abfd, unsigned char *buf, unsigned long buf_len)
   return FALSE;
 }
 
+/* Add free_cached_info functions so we can actually close the
+   bfd's that we opened when looking through archives.  Since we
+   leave the debug info in the .a files, gdb ends up accessing .a
+   files quite a lot.  Leaking them is very bad.  */
+
+/* The thin version closes all the member bfd's.  */
+static bfd_boolean
+mach_o_bfd_thin_free_cached_info (bfd *input)
+{
+  if (bfd_check_format (input, bfd_archive))
+    bfd_archive_free_cached_info (input);
+  return TRUE;
+}
+
+/* The fat version calls free_cached_info on all the member
+   archives, and then closes them.  */
+static bfd_boolean
+mach_o_bfd_fat_free_cached_info (bfd *input)
+{
+  if (bfd_check_format (input, bfd_archive))
+    {
+      unsigned int i;
+      mach_o_fat_data_struct *adata 
+	= (mach_o_fat_data_struct *) input->tdata.mach_o_fat_data;
+      for (i = 0; i < adata->nfat_arch; i++)
+	{
+	  if (adata->archentries[i].abfd != NULL)
+	    {
+	      bfd_free_cached_info (adata->archentries[i].abfd);
+	      bfd_close (adata->archentries[i].abfd);
+	      adata->archentries[i].abfd = NULL;
+	    }
+	}
+    }
+  return TRUE;
+
+}
+
+#define bfd_mach_o_bfd_free_cached_info mach_o_bfd_thin_free_cached_info 
+
 #define TARGET_NAME 		mach_o_be_vec
 #define TARGET_STRING     	"mach-o-be"
 #define TARGET_BIG_ENDIAN 	1
@@ -2699,6 +2903,9 @@ bfd_mach_o_get_uuid (bfd *abfd, unsigned char *buf, unsigned long buf_len)
 #define TARGET_STRING 		"mach-o-fat"
 #define TARGET_BIG_ENDIAN 	1
 #define TARGET_ARCHIVE 		1
+
+#undef bfd_mach_o_bfd_free_cached_info
+#define bfd_mach_o_bfd_free_cached_info               mach_o_bfd_fat_free_cached_info
 
 #include "mach-o-target.c"
 

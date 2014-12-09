@@ -108,6 +108,21 @@ struct varobj_root
   struct varobj_root *next;
 };
 
+/* APPLE LOCAL: In building up the path expression for a varobj,
+   we need to know how to join the children of a varobj to the
+   expression of the parent.  We figure this out as we are making
+   the varobj's, and this enum records the result.  See the 
+   join_in_expr varobj struct element below for some discussion of
+   why this is tricky.  */
+enum varobj_join_type
+  {
+    VAROBJ_AS_DUNNO,   /* This is a error - for types that can't have children.  */
+    VAROBJ_AS_STRUCT, /* For children of structs, joined with a ".".  */
+    VAROBJ_AS_PTR_TO_SCALAR,  /* This is a simple dereference.  */
+    VAROBJ_AS_PTR_TO_STRUCT, /* This will be "->".  */
+    VAROBJ_AS_ARRAY,  /* This is an array reference "[n]".  */
+  };
+
 /* Every variable in the system has a structure of this type defined
    for it. This structure holds all information necessary to manipulate
    a particular object variable. Members which must be freed are noted. */
@@ -124,6 +139,18 @@ struct varobj
   /* Alloc'd expression for this child.  Can be used to create a
      root variable corresponding to this child. */
   char *path_expr;
+  /* In ObjC you can't put the Class name in expressions, even though
+     it shows up in the varobj hierarchy (at least it does with DWARF).
+     So on the one hand we need to propagate the knowledge of how the
+     last parent that actually contributes to the expression should join
+     to its children over these non-contributing elements.  */
+  enum varobj_join_type join_in_expr;
+  /* And it's more convenient to mark whether this variable contributes
+     or not as we build up the varobj.  
+     FIXME: I don't set this for the CPLUS_FAKE_CHILD elements.  They
+     recieve special treatment in too many places, so for now I'm only
+     using this variable for ObjC Objects.  */
+  int elide_in_expr;
   /* APPLE LOCAL end */
 
   /* The alloc'd name for this variable's object. This is here for
@@ -158,6 +185,12 @@ struct varobj
         of the full object, and the value field will be adjusted by 
 	value_full_object to the full object. */
   struct type *dynamic_type;
+  /* Sometimes we can figure out the dynamic type, but it's not something
+     that we have type info for.  In this case, record the type name, 
+     in case our client finds that interesting.  This and the dynamic_type
+     are exclusive of each other.  So if dynamic_type is set, then
+     dynamic_type_name will be NULL & vice versa.  */
+  char *dynamic_type_name;
   /* APPLE LOCAL end */
 
   /* APPLE LOCAL begin */
@@ -333,6 +366,9 @@ static int varobj_value_is_changeable_p (struct varobj *var);
 
 /* APPLE LOCAL is_root_p */
 static int is_root_p (struct varobj *var);
+
+/* APPLE LOCAL set path expression junk.  */
+static enum varobj_join_type get_join_type (struct type *type);
 
 /* C implementation */
 
@@ -529,6 +565,42 @@ is_root_p (struct varobj *var)
 }
 /* APPLE LOCAL end is_root_p */
 
+/* APPLE LOCAL: Returns how you would join the children of
+   a varobj of type TYPE to the varobj's path expression.  */
+
+static enum varobj_join_type 
+get_join_type (struct type *in_type)
+{
+  struct type *type = check_typedef (in_type);
+
+  switch (TYPE_CODE (type))
+    {
+    case TYPE_CODE_PTR:
+      {
+	struct type *target = get_target_type (type);
+	switch (TYPE_CODE (target))
+	  {
+	  case TYPE_CODE_STRUCT:
+	  case TYPE_CODE_UNION:
+	    return VAROBJ_AS_PTR_TO_STRUCT;
+	  default:
+	    return VAROBJ_AS_PTR_TO_SCALAR;
+	    break;
+	  }
+      case TYPE_CODE_STRUCT:
+      case TYPE_CODE_UNION:
+	return VAROBJ_AS_STRUCT;
+	break;
+      case TYPE_CODE_ARRAY:
+	return VAROBJ_AS_ARRAY;
+	break;
+      default:
+	return VAROBJ_AS_DUNNO;
+      }
+    }
+}
+
+
 static struct type *
 safe_value_rtti_target_type (struct value *val, int *full, int *top, int *using_enc)
 {
@@ -557,24 +629,31 @@ safe_value_rtti_target_type (struct value *val, int *full, int *top, int *using_
     return dynamic_type;
 }
 
-static struct value *
-varobj_fixup_value (struct value *in_value, 
-		    int use_dynamic_type,
-		    struct block *block,
-		    struct type **dynamic_type_handle)
-{
   /* Look up the full type of the varobj, and record that in
      var->dynamic_type.  Also, if there is an enclosing type, reset
      the value to that full object.  Otherwise, we leave dynamic_type
      NULL, and don't adjust the value. 
      Note: we don't handle the case where TYPE_CODE is TYPE_CODE_CLASS
-     since that can't have a dynamic type.  */
-  
+     since that can't have a dynamic type.  
+     Also, if we can't find a dynamic type, but we can find the
+     dynamic type name, then we'll return that in DYNAMIC_TYPE_NAME.
+     N.B. If we can find the dynamic type, we won't fill in 
+     DYNAMIC_TYPE_NAME.  */
+
+static struct value *
+varobj_fixup_value (struct value *in_value, 
+		    int use_dynamic_type,
+		    struct block *block,
+		    struct type **dynamic_type_handle,
+		    char **dynamic_type_name)
+{  
   struct value *full_value = in_value;
   struct type *dynamic_type;
   struct type *base_type;
       
   dynamic_type = NULL;
+  if (dynamic_type_name != NULL)
+    *dynamic_type_name = NULL;
   
   base_type = check_typedef (value_type (in_value));
   if (TYPE_CODE(base_type) == TYPE_CODE_PTR)
@@ -593,12 +672,28 @@ varobj_fixup_value (struct value *in_value,
 	  /* If we didn't find a C++ class, let's see if we can find
 	     an ObjC class. */
 	  int ret_val;
+	  char *dynamic_class_name;
 
-	  ret_val = safe_value_objc_target_type (in_value, block, &dynamic_type);
+	  ret_val = safe_value_objc_target_type (in_value, block, &dynamic_type, &dynamic_class_name);
 	  if (!ret_val)
 	    dynamic_type = NULL;
 	  else if (dynamic_type)
 	    dynamic_type = lookup_pointer_type (dynamic_type);
+	  else if (dynamic_class_name != NULL)
+	    {
+	      if (dynamic_type_name == NULL)
+		xfree (dynamic_class_name);
+	      else
+		{
+		  int namelen = strlen (dynamic_class_name);
+		  char *typestr;
+		  typestr = xmalloc (namelen + 3);
+		  memmove (typestr, dynamic_class_name, namelen);
+		  xfree (dynamic_class_name);
+		  strcpy (typestr + namelen, " *");
+		  *dynamic_type_name = typestr;
+		}
+	    }
 	}
     }
   else if (TYPE_CODE (base_type) == TYPE_CODE_REF)
@@ -627,12 +722,28 @@ varobj_fixup_value (struct value *in_value,
 	      /* If we didn't find a C++ class, let's see if we can find
 		 an ObjC class. */
 	      int ret_val;
-
-	      ret_val = safe_value_objc_target_type (in_value, block, &dynamic_type);
+	      char *dynamic_class_name;
+	      
+	      ret_val = safe_value_objc_target_type (in_value, block, &dynamic_type, &dynamic_class_name);
 	      if (!ret_val)
 		dynamic_type = NULL;
 	      else if (dynamic_type)
 		dynamic_type = lookup_reference_type (dynamic_type);
+	      else if (dynamic_class_name != NULL)
+		{
+		  if (dynamic_type_name == NULL)
+		    xfree (dynamic_class_name);
+		  else
+		    {
+		      int namelen = strlen (dynamic_class_name);
+		      char *typestr;
+		      typestr = xmalloc (namelen + 3);
+		      memmove (typestr, dynamic_class_name, namelen);
+		      xfree (dynamic_class_name);
+		      strcpy (typestr + namelen, " &");
+		      *dynamic_type_name = typestr;
+		    }
+		}
 	    }
 	}
     }
@@ -779,7 +890,9 @@ varobj_create (char *objname,
 	  /* Don't allow variables to be created for types. */
 	  if (var->root->exp->elts[0].opcode == OP_TYPE)
 	    {
-	      warning ("Attempt to use a type name as an expression.");
+	      /* APPLE LOCAL: suppress this warning, since Xcode does this 
+		 when raising tooltips over the cast part of an expression.
+		 warning ("Attempt to use a type name as an expression."); */
 	      goto error_cleanup;
 	    }
 	}
@@ -836,7 +949,8 @@ varobj_create (char *objname,
 	      var->type = value_type (var->value);
 	      var->value = varobj_fixup_value (var->value, 
                                                varobj_use_dynamic_type, block,
-					       &(var->dynamic_type));
+					       &(var->dynamic_type),
+					       &(var->dynamic_type_name));
 
 	      if (value_lazy (var->value))
                {
@@ -917,6 +1031,12 @@ varobj_create (char *objname,
 	  return NULL;
 	}
     }
+
+  /* APPLE LOCAL: Give ourselves a hint about how to join this varobj
+     in path expressions.  */
+
+  if (var != NULL && var->type != NULL)
+      var->join_in_expr = get_join_type (var->type);
 
   /* APPLE LOCAL: Reset the scheduler lock, and discard the varobj deletion. */
   do_cleanups (schedlock_chain);
@@ -1156,14 +1276,18 @@ varobj_get_dynamic_type (struct varobj *var)
 {
   struct value *val;
 
-  if (var->dynamic_type == NULL)
+  if (var->dynamic_type != NULL)
+    {
+      /* To print the type, we simply create a zero ``struct value *'' and
+	 cast it to our type. We then typeprint this variable. */
+      val = value_zero (var->dynamic_type, not_lval);
+      
+      return (type_sprint (value_type (val), "", -1));
+    }
+  else if (var->dynamic_type_name != NULL)
+    return xstrdup (var->dynamic_type_name);
+  else
     return xstrdup ("");
-
-  /* To print the type, we simply create a zero ``struct value *'' and
-     cast it to our type. We then typeprint this variable. */
-  val = value_zero (var->dynamic_type, not_lval);
-
-  return (type_sprint (value_type (val), "", -1));
 }
 
 struct type *
@@ -1250,7 +1374,6 @@ int
 varobj_set_value (struct varobj *var, char *expression)
 {
   struct value *val;
-  int offset = 0;
   int error = 0;
 
   /* The argument "expression" contains the variable's new value.
@@ -1744,6 +1867,7 @@ create_child (struct varobj *parent, int index, char *name)
   struct varobj *child;
   char *childs_name;
   enum varobj_type_change type_changed;
+  struct type *target;
   
   child = new_variable ();
 
@@ -1786,6 +1910,43 @@ create_child (struct varobj *parent, int index, char *name)
 
   /* Now get the type & value of the child. */
   child->type = type_of_child (child);
+  
+  /* APPLE LOCAL: Compute here how we would join this child in
+     expressions.  ObjC base classes and C++ fake children just
+     inherit the join type of their parents.  */
+
+  /* FIXME: We should really set "elide_in_expr" for C++ fake children
+     as well, but there's too much other code that treats the
+     CPLUS_FAKE_CHILD specially and I don't have time to disentangle
+     it right now.  So we don't set the elide_in_expr, and let the
+     other code handle the fake children.  */
+  
+  if (CPLUS_FAKE_CHILD (parent))
+    child->join_in_expr = parent->join_in_expr;
+  else
+    {
+      if (TYPE_CODE (parent->type) == TYPE_CODE_PTR)
+	{
+	  target = get_target_type (parent->type);
+	}
+      else
+	target = parent->type;
+
+      if (target != NULL
+	  && TYPE_CODE (target) == TYPE_CODE_STRUCT
+	  && TYPE_RUNTIME (target) == OBJC_RUNTIME 
+	  && index < TYPE_N_BASECLASSES (target))
+	{
+	  /* This is an ObjC base class.  */
+	  child->elide_in_expr = 1;
+	  child->join_in_expr = parent->join_in_expr;
+	}
+      else if (CPLUS_FAKE_CHILD (child))
+	  child->join_in_expr = parent->join_in_expr;
+      else
+	child->join_in_expr = get_join_type (child->type);
+    }
+
   child->value = value_of_child (parent, index, &type_changed);
 
   if ((!CPLUS_FAKE_CHILD(child) && child->value == NULL) || parent->error)
@@ -1850,8 +2011,12 @@ new_variable (void)
   var->obj_name = NULL;
   var->index = -1;
   var->type = NULL;
-  /* APPLE LOCAL dynamic type */
+  /* APPLE LOCAL dynamic type and path_expr.  */
   var->dynamic_type = NULL;
+  var->dynamic_type_name = NULL;
+  var->path_expr = NULL;
+  var->elide_in_expr = 0;
+  var->join_in_expr = VAROBJ_AS_DUNNO;
   var->value = NULL;
   var->error = 0;
   var->num_children = -1;
@@ -1898,6 +2063,7 @@ free_variable (struct varobj *var)
   xfree (var->name);
   xfree (var->path_expr);
   xfree (var->obj_name);
+  xfree (var->dynamic_type_name);
   xfree (var);
 }
 
@@ -2257,6 +2423,17 @@ path_expr_of_variable (struct varobj *var)
   /* APPLE LOCAL is_root_p */
   else if (is_root_p (var))
     return var->name;
+  else if (var->elide_in_expr)
+    {
+      if (CPLUS_FAKE_CHILD (var->parent))
+	/* FIXME: Note we won't get here for now, since I don't set
+	   the elide_in_expr for fake children.  But this is how it
+	   really should work...  */
+	var->path_expr = xstrdup (path_expr_of_variable (var->parent->parent));
+      else
+	var->path_expr = xstrdup (path_expr_of_variable (var->parent));
+      return var->path_expr;
+    }
   else
     return path_expr_of_child (var->parent, var->index);
 }
@@ -2483,25 +2660,54 @@ value_of_child (struct varobj *parent, int index,
     {
       struct type *dynamic_type;
       struct value *new_value;
+      char *dynamic_type_name;
 
       new_value = varobj_fixup_value (value, varobj_use_dynamic_type, 
 				      child->root->valid_block,
-				      &dynamic_type);
+				      &dynamic_type, &dynamic_type_name);
 
       /* value_of_child returns a value that has been released.  So if
 	 we are going to replace it, we need to free the old value,
 	 and release the new one.  */
 
-      if (new_value != value) {
-	value_free (value);
-	release_value (new_value);
-	value = new_value;
-      }
+      if (new_value != value) 
+	{
+	  value_free (value);
+	  release_value (new_value);
+	  value = new_value;
+	}
 
       if (dynamic_type != child->dynamic_type)
 	{
 	  child->dynamic_type = dynamic_type;
+	  if (child->dynamic_type_name != NULL)
+	    {
+	      xfree (child->dynamic_type_name);
+	      child->dynamic_type_name = NULL;
+	    }
 	  *type_changed = VAROBJ_DYNAMIC_TYPE_CHANGED;
+	}
+
+      if (child->dynamic_type == NULL)
+	{
+	  if (child->dynamic_type_name == NULL)
+	    {
+	      if (dynamic_type_name != NULL)
+		{
+		  child->dynamic_type_name = dynamic_type_name;
+		  *type_changed = VAROBJ_DYNAMIC_TYPE_CHANGED;
+		}
+	    }
+	  else
+	    {
+	      if (dynamic_type_name == NULL
+		  || strcmp (child->dynamic_type_name, dynamic_type_name) != 0)
+		{
+		  xfree (child->dynamic_type_name);
+		  child->dynamic_type_name = dynamic_type_name;
+		  *type_changed = VAROBJ_DYNAMIC_TYPE_CHANGED;
+		}
+	    }
 	}
     }
 
@@ -2698,8 +2904,6 @@ c_make_name_of_child (struct varobj *parent, int index)
 static char *
 c_path_expr_of_child (struct varobj *parent, int index)
 {
-  struct type *type;
-  struct type *target;
   char *path_expr;
   struct varobj *child = child_exists (parent, index);
   char *parent_expr;
@@ -2712,16 +2916,19 @@ c_path_expr_of_child (struct varobj *parent, int index)
 
   parent_expr = path_expr_of_variable (parent);
   name = name_of_variable (child);
+
+  /* If the child has a NULL or empty name it must be an anonomyous
+     structure or union.  In that case, return the parent's name.  */
+  if (name == NULL || strlen (name) == 0)
+    return parent_expr;
+
   parent_len = strlen (parent_expr);
   child_len = strlen (name);
   len = parent_len + child_len + 2 + 1; /* 2 for (), and 1 for null */
 
-  type = get_type (parent);
-  target = get_target_type (type);
-
-  switch (TYPE_CODE (type))
+  switch (parent->join_in_expr)
     {
-    case TYPE_CODE_ARRAY:
+    case VAROBJ_AS_ARRAY:
       {
 	/* We never get here unless parent->num_children is greater than 0... */
 	
@@ -2731,32 +2938,24 @@ c_path_expr_of_child (struct varobj *parent, int index)
       }
       break;
 
-    case TYPE_CODE_STRUCT:
-    case TYPE_CODE_UNION:
+    case VAROBJ_AS_STRUCT:
       len += 1;
       path_expr = (char *) xmalloc (len);
       sprintf (path_expr, "(%s).%s", parent_expr, name);
       break;
 
-    case TYPE_CODE_PTR:
-      switch (TYPE_CODE (target))
-	{
-	case TYPE_CODE_STRUCT:
-	case TYPE_CODE_UNION:
-	  len += 2;
-	  path_expr = (char *) xmalloc (len);
-	  sprintf (path_expr, "(%s)->%s", parent_expr, name);
-	  break;
-
-	default:
-	  len += parent_len + 2 + 1 + 1;
-	  path_expr = (char *) xmalloc (len);
-	  sprintf (path_expr, "*(%s)", parent_expr);
-	  break;
-	}
+    case VAROBJ_AS_PTR_TO_STRUCT:
+      len += 2;
+      path_expr = (char *) xmalloc (len);
+      sprintf (path_expr, "(%s)->%s", parent_expr, name);
+      break;
+    case VAROBJ_AS_PTR_TO_SCALAR:
+      len += parent_len + 2 + 1 + 1;
+      path_expr = (char *) xmalloc (len);
+      sprintf (path_expr, "*(%s)", parent_expr);
       break;
 
-    default:
+    case VAROBJ_AS_DUNNO:
       /* This should not happen */
       len = 5;
       path_expr =
@@ -2808,17 +3007,43 @@ c_value_of_root (struct varobj **var_handle, enum varobj_type_change *type_chang
       if (gdb_evaluate_expression (var->root->exp, &new_val))
 	{
 	  struct type *dynamic_type;
+	  char *dynamic_type_name;
 	  new_val = varobj_fixup_value (new_val, varobj_use_dynamic_type, 
 					var->root->valid_block,
-					&dynamic_type);
-	  if (varobj_use_dynamic_type && (var->dynamic_type != dynamic_type))
+					&dynamic_type, &dynamic_type_name);
+	  if (varobj_use_dynamic_type)
 	    {
-	      *type_changed = VAROBJ_DYNAMIC_TYPE_CHANGED;
-	      var->dynamic_type = dynamic_type;
-
-	      /* Probably need to kill the children and reset the number of children... */
-	      varobj_delete (var, NULL, 1);
-	      var->num_children = number_of_children (var);
+	      if (var->dynamic_type != dynamic_type)
+		{
+		  *type_changed = VAROBJ_DYNAMIC_TYPE_CHANGED;
+		  var->dynamic_type = dynamic_type;
+		  xfree (var->dynamic_type_name);
+		  
+		  /* Probably need to kill the children and reset the number of children... */
+		  varobj_delete (var, NULL, 1);
+		  var->num_children = number_of_children (var);
+		}
+	      if (var->dynamic_type == NULL)
+		{
+		  if (var->dynamic_type_name == NULL)
+		    {
+		      if (dynamic_type_name != NULL)
+			{
+			  *type_changed = VAROBJ_DYNAMIC_TYPE_CHANGED;
+			  var->dynamic_type_name = dynamic_type_name;
+			}
+		    }
+		  else
+		    {
+		      if (dynamic_type_name == NULL
+			  || strcmp (dynamic_type_name, var->dynamic_type_name) != 0)
+			{
+			  *type_changed = VAROBJ_DYNAMIC_TYPE_CHANGED;
+			  xfree (var->dynamic_type_name);
+			  var->dynamic_type_name = dynamic_type_name;
+			}
+		    }
+		}
 	    }
 
 	  if (value_lazy (new_val))
@@ -3584,10 +3809,15 @@ cplus_path_expr_of_child (struct varobj *parent, int index)
     error ("cplus_path_expr_of_child: " 
 	   "Tried to get path expression for a null child.");
 
+  /* If the child has a NULL or empty name it must be an anonomyous
+     structure or union.  In that case, return the parent's name.  */
+  if (name_of_variable (child) == NULL ||
+      strlen (name_of_variable (child)) == 0)
+    return parent_expr;
+
   /* The path expression for a fake child is just the parent, 
      that way we can just concatenate the fake child's expr and
      its real children. */
-
   if (CPLUS_FAKE_CHILD (child))
       return parent_expr;
 
@@ -3598,6 +3828,12 @@ cplus_path_expr_of_child (struct varobj *parent, int index)
     }
   else
     type = get_type_deref (parent, &is_ptr);
+
+  /* If the parent belongs to the ObjC runtime, let the c_path_expr_of_child
+     do the work.  We don't have an objc language specific vector, since it's
+     very little different from the basic C case.  */
+  if (TYPE_RUNTIME (type) == OBJC_RUNTIME)
+    return c_path_expr_of_child (parent, index);
 
   path_expr = NULL;
   switch (TYPE_CODE (type))
@@ -3773,7 +4009,6 @@ cplus_value_of_child (struct varobj *parent, int index, int *lookup_dynamic_type
     {
       if (CPLUS_FAKE_CHILD (parent))
 	{
-	  char *name;
 	  enum gdb_rc ret_val;
 	  struct varobj *child;
 	  struct value *temp = parent->parent->value;
@@ -3937,7 +4172,26 @@ cplus_value_of_variable (struct varobj *var)
   if (CPLUS_FAKE_CHILD (var))
     return xstrdup ("");
 
-  return c_value_of_variable (var);
+  /* val_print will print the children for
+     references, which is not what we want.  */
+  switch (TYPE_CODE (get_type (var)))
+    {
+    case TYPE_CODE_REF:
+      {
+	struct type *real_type;
+	int was_ptr;
+	real_type = get_type_deref (var, &was_ptr);
+	if (real_type 
+	    && (TYPE_CODE (real_type) == TYPE_CODE_STRUCT
+		|| TYPE_CODE (real_type) == TYPE_CODE_CLASS))
+	  return xstrdup ("{...}");
+	/* FIXME: Need to call c_value_of_variable on the
+	   dereferenced form, otherwise
+	   we print "@0xbffffff <value>" which is ugly. */
+      }
+    default:
+      return c_value_of_variable (var);
+    }
 }
 
 /* Java */
