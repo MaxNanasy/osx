@@ -1,32 +1,30 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist SYSTEM "file://localhost/System/Library/DTDs/PropertyList.dtd">
-<plist version="0.9">
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>English</string>
 	<key>CFBundleExecutable</key>
-	<string>ccidDriver</string>
+	<string>CRYPTOCardPCCard</string>
 	<key>CFBundleGetInfoString</key>
-	<string>SCM SCR331 CCID Driver</string>
+	<string>CRYPTOCard PC Card Reader</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>scr331ccidDriver</string>
+	<string>CRYPTOCard PC Card Reader</string>
 	<key>CFBundlePackageType</key>
 	<string>BNDL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.1.4</string>
-	<key>CFBundleIdentifier</key>
-	<string>com.apple.scmccid</string>
+	<string>6.0</string>
 	<key>CFBundleSignature</key>
-	<string>????</string>
+	<string>CCrd</string>
 	<key>CFBundleVersion</key>
-	<string>1.1.4</string>
+	<string>6.0.1d3</string>
 	<key>ifdFriendlyName</key>
-	<string>SCM SCR331 CCID</string>
-	<key>ifdProductID</key>
-	<string>0xE001</string>
+	<string>CRYPTOCard PC Card Reader</string>
 	<key>ifdVendorID</key>
-	<string>0x04E6</string>
+	<string>2bd</string>
+	<key>ifdProductID</key>
+	<string>1003</string>
 </dict>
 </plist>
