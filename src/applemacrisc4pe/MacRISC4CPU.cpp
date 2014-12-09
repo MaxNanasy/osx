@@ -3,20 +3,19 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -98,7 +97,6 @@ static bool								gI2CTransactionComplete;
 static IOService						*gI2CDriver,
 										*gTBDriver;
 static const OSSymbol					*gTBFunctionNameSym;
-static const OSSymbol					*gTBReadFunctionNameSym;		// XXX Temp!!!
 static const cpu_timebase_params_t		*gTimeBaseParams;
 static UInt32 							*gPHibernateState;
 
@@ -192,13 +190,6 @@ bool MacRISC4CPU::start(IOService *provider)
 				//MYLOG ("4CPU: got tb function '%s'\n", functionName);
 				gTBFunctionNameSym = OSSymbol::withCString(functionName);
 
-				// XXX - This is temporary for Waveland bringup
-				if (cpusRegEntry->getProperty ("platform-read-cpu-timebase")) {
-					sprintf(functionName, "%s-%08lx", "platform-read-cpu-timebase", 
-						*((UInt32 *)pHandle->getBytesNoCopy()));
-					//MYLOG ("4CPU: got tb read function '%s'\n", functionName);
-					gTBReadFunctionNameSym = OSSymbol::withCString(functionName);
-				}
 			}
 		} else {
 			/*
@@ -783,36 +774,11 @@ void MacRISC4CPU::enableCPUTimeBase(bool enable)
 		UInt32		gpioValue;
 		UInt32 		count = 0;
 		
-		// XXX - temp for Waveland bringup - for Waveland we always drive the GPIO low
-		// SMU will set it high when it is done which is how we know it is complete - see
-		// the poll loop below.
-		// For normal systems, the GPIO itself drives the timebase signal so we just have
-		// to set it high or low to control it.
-		if (gTBReadFunctionNameSym) 
-			gpioValue = 0;
-		else
-			gpioValue = enable ? 1 : 0;
+		gpioValue = enable ? 1 : 0;
 		
 		// GPIO driver can handle it
 		gTBDriver->callPlatformFunction (gTBFunctionNameSym, false, (void *)gpioValue, 0, 0, 0);
 		
-		// XXX - temp for Waveland bringup
-		if (gTBReadFunctionNameSym) {
-			UInt32 gpioState;
-				
-			do {
-								
-				count++;
-				// Wait for SMU to restore GPIO state
-				gTBDriver->callPlatformFunction (gTBReadFunctionNameSym, false, (void *)&gpioState, 0, 0, 0);
-				//getCPUTimebase (&tbu, &tbl);
-				//kprintf ("4CPU::tb read tb gpio got value %d, current tb values %d, %ud\n", gpioState, tbu, tbl);
-			} while ((gpioState == 0) && (count < 15));
-			
-			//getCPUTimebase (&tbu, &tbl);
-		
-			kprintf ("MacRISC4CPU::enableCPUTimeBase(%s) complete\n", enable ? "enable" : "disable");
-		}
 	} else {
 		// Do it messy I2C way 
 		UInt8 sevenBitAddr, buf, tmp;
