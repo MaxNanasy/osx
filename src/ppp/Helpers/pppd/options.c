@@ -62,7 +62,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#define RCSID	"$Id: options.c,v 1.20 2005/02/27 21:10:15 lindak Exp $"
+#define RCSID	"$Id: options.c,v 1.20.26.1 2005/10/28 22:47:01 lindak Exp $"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -1679,7 +1679,8 @@ loadplugin(argv)
     err = sys_loadplugin(*argv);
     if (err) {
 	option_error("Couldn't load plugin %s", arg);
-        return 0;
+		// continue without loading plugin
+        return 1;
     }
 
     //info("Plugin %s loaded.", arg);

@@ -192,7 +192,7 @@ return the pid of racoon process
 int 
 racoon_pid()
 {
-    int   	pid = 0, err, name[3];
+    int   	pid = 0, err, name[4];
     FILE 	*f;
     size_t	namelen, infolen;
     struct kinfo_proc	info;

@@ -116,6 +116,7 @@ int main (int argc, char *argv[])
 	exit(EXIT_NOT_ROOT);
     }
     
+
     params = (struct vpn_params*)malloc(sizeof (struct vpn_params));
     if (params == 0)
         exit(EXIT_FATAL_ERROR);

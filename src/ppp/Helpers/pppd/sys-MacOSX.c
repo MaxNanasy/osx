@@ -42,7 +42,7 @@
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  */
 
-#define RCSID	"$Id: sys-MacOSX.c,v 1.38 2005/03/11 05:48:32 lindak Exp $"
+#define RCSID	"$Id: sys-MacOSX.c,v 1.38.20.1 2005/12/07 23:34:09 lindak Exp $"
 
 /* -----------------------------------------------------------------------------
   Includes
@@ -1161,7 +1161,7 @@ void output(int unit, u_char *p, int len)
     
     // link protocol are sent to the link
     // other protocols are send to the bundle
-    if (write((*(u_short*)p >= 0xC000) ? ppp_fd : ppp_sockfd, p, len) < 0) {
+    if (write((ntohs(*(u_short*)p) >= 0xC000) ? ppp_fd : ppp_sockfd, p, len) < 0) {
 	if (errno != EIO)
 	    error("write: %m");
     }
