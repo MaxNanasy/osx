@@ -76,6 +76,8 @@ inline void flip(Base * &obj)			{ flip(&obj, sizeof(obj)); }
 //
 void flip(void *addr, size_t size);
 
+void flip(CSSM_DB_ATTRIBUTE_INFO &obj);
+inline void flip(CssmDbAttributeInfo &obj) { flip(static_cast<CSSM_DB_ATTRIBUTE_INFO &>(obj)); }
 
 //
 // Include automatically generated flipper declarations
