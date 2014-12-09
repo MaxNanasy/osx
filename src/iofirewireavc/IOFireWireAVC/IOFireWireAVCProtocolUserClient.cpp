@@ -270,6 +270,7 @@ void IOFireWireAVCProtocolUserClient::avcTargetCommandHandler(const AVCCommandHa
 	// Send rest of packet if necessary
 	while(cmdLen) {
 		copyLen = cmdLen;
+		dst = (UInt8 *)(args+2);
 		if(copyLen > (kMaxAsyncArgs - 2)*sizeof(void *))
 			copyLen =  (kMaxAsyncArgs - 2)*sizeof(void *);
 		bcopy(src, dst, copyLen);
@@ -401,6 +402,14 @@ IOReturn IOFireWireAVCProtocolUserClient::newUserClient( task_t owningTask, void
     *handler = this;
     fStarted = true;
     fTask = owningTask;
+
+	// Allow Rosetta based apps access to this user-client
+	if (properties)
+	{
+		properties->setObject("IOUserClientCrossEndianCompatible", kOSBooleanTrue);
+		setProperty("IOUserClientCrossEndianCompatible", kOSBooleanTrue);
+	}
+	
     return kIOReturnSuccess;
 }
 

@@ -184,6 +184,11 @@ bool IOFireWireAVCUserClient::initWithTask(
 	FIRELOG_MSG(("IOFireWireAVCUserClient::initWithTask (this=0x%08X)\n",this));
 	
 	fTask = owningTask;
+	
+	// Allow Rosetta based apps access to this user-client
+	if (properties)
+		properties->setObject("IOUserClientCrossEndianCompatible", kOSBooleanTrue);
+	
 	return IOUserClient::initWithTask(owningTask, securityToken, type,properties);
 }
 
@@ -246,13 +251,14 @@ void IOFireWireAVCUserClient::stop( IOService * provider )
     
     fStarted = false;
     
-	// TODO: Deal with the fUCAsyncCommands array, deal with any outstanding commands and release it
+	// Deal with the fUCAsyncCommands array, deal with any outstanding commands and release it
 	IOTakeLock(fAsyncAVCCmdLock);
 	while (fUCAsyncCommands->getCount())
 	{
 		pUCAsyncCommand = (IOFireWireAVCUserClientAsyncCommand *)fUCAsyncCommands->getObject(0);
 		if (pUCAsyncCommand)
 		{
+			pUCAsyncCommand->pAsyncCommand->cancel();	// Cancel, just in case it's still pending!
 			pUCAsyncCommand->pAsyncCommand->release();
 			
 			// Get rid of the memory descriptor for the shared buf
@@ -636,6 +642,7 @@ IOReturn IOFireWireAVCUserClient::updateP2PCount(UInt32 addr, SInt32 inc, bool f
     IOFWReadQuadCommand *readCmd;
     IOFWCompareAndSwapCommand *lockCmd;
     UInt32 plugVal, newVal;
+	UInt32 plugValHost, newValHost;
 	UInt32 curCount;
 	UInt32 curChan;
 	IOFWSpeed curSpeed;
@@ -646,15 +653,17 @@ IOReturn IOFireWireAVCUserClient::updateP2PCount(UInt32 addr, SInt32 inc, bool f
     readCmd->release();
     if(res != kIOReturnSuccess)
         return res;
-        
+    
+	plugValHost = OSSwapBigToHostInt32( plugVal );
+		    
     for(int i=0; i<4; i++) {
         bool success;
 
 		// Parse current plug value
-		curCount = ((plugVal & kIOFWPCRP2PCount) >> 24);
-		curChan = ((plugVal & kIOFWPCRChannel) >> 16);
-		curSpeed = (IOFWSpeed)((plugVal & kIOFWPCROutputDataRate) >> 14);
-		newVal = plugVal;
+		curCount = ((plugValHost & kIOFWPCRP2PCount) >> 24);
+		curChan = ((plugValHost & kIOFWPCRChannel) >> 16);
+		curSpeed = (IOFWSpeed)((plugValHost & kIOFWPCROutputDataRate) >> 14);
+		newValHost = plugValHost;
 
 		// If requested, modify channel
 		if (chan != 0xFFFFFFFF)
@@ -662,8 +671,8 @@ IOReturn IOFireWireAVCUserClient::updateP2PCount(UInt32 addr, SInt32 inc, bool f
 			if ((curCount != 0) && (chan != curChan))
 				return kIOReturnError;
 
-			newVal &= ~kIOFWPCRChannel;
-			newVal |= ((chan & 0x3F) << 16);
+			newValHost &= ~kIOFWPCRChannel;
+			newValHost |= ((chan & 0x3F) << 16);
 		}
 
 		// If requested, modify speed
@@ -672,28 +681,30 @@ IOReturn IOFireWireAVCUserClient::updateP2PCount(UInt32 addr, SInt32 inc, bool f
 			if ((curCount != 0) && (speed != curSpeed))
 				return kIOReturnError;
 
-			newVal &= ~kIOFWPCROutputDataRate;
-			newVal |= ((speed & 0x03) << 14);
+			newValHost &= ~kIOFWPCROutputDataRate;
+			newValHost |= ((speed & 0x03) << 14);
 		}
 
 		// Modify P2P count
-		newVal &= ~kIOFWPCRP2PCount;
+		newValHost &= ~kIOFWPCRP2PCount;
 		if (inc > 0)
 		{
 			if (curCount == 0x3F)
 				return kIOReturnError;
-			newVal |= ((curCount+1) << 24);
+			newValHost |= ((curCount+1) << 24);
 		}
 		else
 		{
 			if (curCount == 0)
 				return kIOReturnError;
-			newVal |= ((curCount-1) << 24);
+			newValHost |= ((curCount-1) << 24);
 		}
 		
+		newVal = OSSwapHostToBigInt32( newValHost );
         lockCmd = device->createCompareAndSwapCommand(plugAddr, &plugVal, &newVal, 1);
         res = lockCmd->submit();
         success = lockCmd->locked(&plugVal);
+		plugValHost = OSSwapBigToHostInt32( plugVal );
         lockCmd->release();
         if(res != kIOReturnSuccess)
             break;
@@ -995,6 +1006,7 @@ IOReturn IOFireWireAVCUserClient::ReleaseAVCAsyncCommand(UInt32 commandHandle)
 	
 	if (found == true)
 	{
+		pUCAsyncCommand->pAsyncCommand->cancel();	// Cancel, just in case it's still pending!
 		pUCAsyncCommand->pAsyncCommand->release();
 		
 		// Get rid of the memory descriptor for the shared buf
