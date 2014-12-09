@@ -434,6 +434,10 @@ void IOFWCompareAndSwapCommand::gotPacket( int rcode, const void* data, int size
         return;
     }
 	
+	// Truncate the receive packet, if greater than 8 bytes.
+	if (size > 8)
+		size = 8;
+	
     for( i = 0; i < size / 4; i++ ) 
 	{
         fOldVal[i] = ((UInt32 *)data)[i];

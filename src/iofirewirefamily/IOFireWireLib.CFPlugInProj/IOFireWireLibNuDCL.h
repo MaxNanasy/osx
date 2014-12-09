@@ -6,6 +6,9 @@
  *  Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
  *
  *	$Log: IOFireWireLibNuDCL.h,v $
+ *	Revision 1.6.20.1  2006/01/17 00:35:00  niels
+ *	<rdar://problem/4399365> FireWire NuDCL APIs need Rosetta support
+ *	
  *	Revision 1.6  2003/08/25 08:39:17  niels
  *	*** empty log message ***
  *	
@@ -111,7 +114,7 @@ namespace IOFireWireLib {
 		public :
 		
 			UInt8		headerBytes ;
-			bool		wait ;
+			UInt8		wait ;
 			
 			inline ReceiveNuDCLSharedData() : headerBytes( 0 ), wait( false ) {}
 	} ;
@@ -248,7 +251,7 @@ namespace IOFireWireLib {
 
 		public:
 		
-			void					SetUserHeaderPtr ( UInt32 * userHeaderPtr, UInt32 * mask )	{ fSendData.userHeader.ptr = userHeaderPtr ;  }
+			void					SetUserHeaderPtr ( UInt32 * userHeaderPtr, UInt32 * mask )	{ fSendData.userHeader.ptr = userHeaderPtr ; fSendData.userHeaderMask.ptr = mask ;  }
 			UInt32 *				GetUserHeaderPtr ()	const									{ return fSendData.userHeader.ptr ; }
 			UInt32 *				GetUserHeaderMask () const									{ return fSendData.userHeaderMask.ptr ; }
 

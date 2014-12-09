@@ -184,19 +184,19 @@ IOFWDCLPool :: importUserProgram (
 	IOVirtualRange			bufferRanges[],
 	IOMemoryMap *			bufferMap )
 {
-	InfoLog("+IOFWDCLPool::importUserProgram\n") ;
+	InfoLog("+IOFWDCLPool<%p>::importUserProgram()\n", this ) ;
 	
 	IOByteCount exportLength = userExportDesc->getLength() ;
 	if ( exportLength == 0 )
 	{
-		DebugLog("export data length == 0\n") ;
+		DebugLog("IOFWDCLPool<%p>::importUserProgram()--export data length == 0\n", this) ;
 		return kIOReturnError ;
 	}
 	
 	UInt8 * exportData = new UInt8[ exportLength ] ;
 	if ( !exportData )
 	{
-		DebugLog("couldn't allocate export data block\n") ;
+		DebugLog("IOFWDCLPool<%p>::importUserProgram()--couldn't allocate export data block\n", this ) ;
 		return kIOReturnNoMemory ;
 	}
 
@@ -216,15 +216,19 @@ IOFWDCLPool :: importUserProgram (
 
 		UInt8 * exportCursor = exportData ;
 		
-		InfoLog("import DCLs, pass 1...\n") ;
+		InfoLog("IOFWDCLPool<%p>::importUserProgram()--import DCLs, pass 1... exportLength=0x%lx\n", this, exportLength ) ;
 		
 		while( !error && exportCursor < exportData + exportLength )
 		{
 			NuDCLSharedData * data = (NuDCLSharedData*)exportCursor ;
-			exportCursor += sizeof( *data ) ;
+			exportCursor += ( sizeof( *data ) + 4 ) & ~(size_t)0x3 ;
 
+			InfoLog("IOFWDCLPool<%p>::importUserProgram()--data=%p, data->rangeCount=0x%lx\n", this, data, data ? data->rangeCount : 0 ) ;
+			
 			IOVirtualRange		kernRanges[ data->rangeCount ] ;
 			IOVirtualAddress	kernBaseAddress = bufferMap->getVirtualAddress() ;
+			
+			InfoLog("IOFWDCLPool<%p>::importUserProgram()--kernBaseAddress=%p\n", this, kernBaseAddress) ;
 			
 			for( unsigned index=0; index < data->rangeCount; ++index )
 			{
@@ -257,7 +261,7 @@ IOFWDCLPool :: importUserProgram (
 					case NuDCLSharedData::kSendType :
 					{
 						SendNuDCLSharedData * sendData = ( SendNuDCLSharedData * )exportCursor ;
-						exportCursor = (UInt8*)( sendData + 1 ) ;
+						exportCursor += ( sizeof( *sendData ) + 4 ) & ~(size_t)0x3 ;
 
 						if ( !appendSendDCL( NULL, data->rangeCount, kernRanges ) )
 						{
@@ -270,7 +274,7 @@ IOFWDCLPool :: importUserProgram (
 					case NuDCLSharedData::kReceiveType :
 					{
 						ReceiveNuDCLSharedData * rcvData = ( ReceiveNuDCLSharedData * )exportCursor ;
-						exportCursor = (UInt8*)( rcvData + 1 ) ;
+						exportCursor += ( sizeof( *rcvData ) + 4 ) & ~(size_t)0x3 ;
 
 						if ( !appendReceiveDCL( NULL, rcvData->headerBytes, data->rangeCount, kernRanges ) )
 						{
@@ -291,14 +295,14 @@ IOFWDCLPool :: importUserProgram (
 					}
 	
 					default :
-						ErrorLog("invalid export data\n") ;
+						ErrorLog("IOFWDCLPool<%p>::importUserProgram()--invalid export data\n", this) ;
 						error = kIOReturnInternalError ;
 						break ;
 				}
 			}
 		}
 		
-		InfoLog("...done error=%x\n", error ) ;
+		InfoLog("IOFWDCLPool<%p>::importUserProgram()--pass 1 done, error=%x\n", this, error ) ;
 	}
 	
 	if ( !error )
@@ -324,10 +328,7 @@ IOFWDCLPool :: importUserProgram (
 		InfoLog("...done error=%x\n", error ) ;		
 	}
 	
-	for( unsigned index=0, count=fProgram->getCount(); index < count; ++index )
-	{
-		((IOFWDCL*)fProgram->getObject( index ))->debug() ;
-	}
+	delete exportData;
 	
 	return error ;
 }
