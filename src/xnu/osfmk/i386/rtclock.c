@@ -1,29 +1,23 @@
 /*
  * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * @APPLE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. The rights granted to you under the License
- * may not be used to create, or enable the creation or redistribution of,
- * unlawful or unlicensed copies of an Apple operating system, or to
- * circumvent, violate, or enable the circumvention or violation of, any
- * terms of an Apple operating system software license agreement.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
- * Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this file.
- * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
- * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ * @APPLE_LICENSE_HEADER_END@
  */
 /*
  * @OSF_COPYRIGHT@
@@ -153,7 +147,7 @@ deadline_to_decrementer(
 	}
 }
 
-static void
+void
 rtc_lapic_start_ticking(void)
 {
 	uint64_t	abstime;
@@ -216,18 +210,14 @@ rtc_nanotime_set_commpage(rtc_nanotime_t *rntp)
 /*
  * rtc_nanotime_init:
  *
- * Intialize the nanotime info from the base time.  Since
- * the base value might be from a lower resolution clock,
- * we compare it to the TSC derived value, and use the
- * greater of the two values.
+ * Intialize the nanotime info from the base time.
  */
 static inline void
 _rtc_nanotime_init(rtc_nanotime_t *rntp, uint64_t base)
 {
-	uint64_t	nsecs, tsc = rdtsc64();
+	uint64_t	tsc = rdtsc64();
 
-	nsecs = _tsc_to_nanoseconds(tsc);
-	rtc_nanotime_store(tsc, MAX(nsecs, base), rntp->scale, rntp->shift, rntp);
+	rtc_nanotime_store(tsc, base, rntp->scale, rntp->shift, rntp);
 }
 
 static void
@@ -240,7 +230,7 @@ rtc_nanotime_init(uint64_t base)
 }
 
 /*
- * rtc_nanotime_init:
+ * rtc_nanotime_init_commpage:
  *
  * Call back from the commpage initialization to
  * cause the commpage data to be filled in once the
@@ -344,28 +334,20 @@ rtc_clock_stepped(__unused uint32_t new_frequency,
  *
  * Invoked from power manageent when we have awoken from a sleep (S3)
  * and the TSC has been reset.  The nanotime data is updated based on
- * the HPET value.
+ * the passed in value.
  *
  * The caller must guarantee non-reentrancy.
  */
 void
-rtc_sleep_wakeup(void)
+rtc_sleep_wakeup(
+	uint64_t		base)
 {
-	boolean_t		istate;
-
-	istate = ml_set_interrupts_enabled(FALSE);
-
 	/*
 	 * Reset nanotime.
 	 * The timestamp counter will have been reset
 	 * but nanotime (uptime) marches onward.
 	 */
-	rtc_nanotime_init(tmrCvt(rdHPET(), hpetCvtt2n));
-
-	/* Restart tick interrupts from the LAPIC timer */
-	rtc_lapic_start_ticking();
-
-	ml_set_interrupts_enabled(istate);
+	rtc_nanotime_init(base);
 }
 
 /*

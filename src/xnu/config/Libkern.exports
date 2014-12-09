@@ -790,6 +790,7 @@ _strncasecmp
 _strncat
 _strncmp
 _strncpy
+_strnlen
 _strprefix
 _strtol
 _strtoq

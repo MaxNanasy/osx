@@ -1,29 +1,23 @@
 /*
  * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * @APPLE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. The rights granted to you under the License
- * may not be used to create, or enable the creation or redistribution of,
- * unlawful or unlicensed copies of an Apple operating system, or to
- * circumvent, violate, or enable the circumvention or violation of, any
- * terms of an Apple operating system software license agreement.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
- * Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this file.
- * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
- * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ * @APPLE_LICENSE_HEADER_END@
  */
 /*
  * @OSF_COPYRIGHT@
@@ -138,9 +132,9 @@ CACHE_DESC(CPUID_CACHE_DTLB_128,	Lnone,	0,		0, \
 	"Data TLB, 4K and 4M pages, 128 entries"),
 CACHE_DESC(CPUID_CACHE_DTLB_256,	Lnone,	0,		0, \
 	"Data TLB, 4K and 4M pages, 256 entries"),
-CACHE_DESC(CPUID_CACHE_ITLB_128_4,      Lnone,  0,              0, \
+CACHE_DESC(CPUID_CACHE_ITLB_4K_128_4,      Lnone,  0,              0, \
         "Instruction TLB, 4K pages, 4-way set associative, 128 entries"),
-CACHE_DESC(CPUID_CACHE_DTLB_128_4,      Lnone,  0,              0, \
+CACHE_DESC(CPUID_CACHE_DTLB_4K_128_4,      Lnone,  0,              0, \
         "Data TLB, 4K pages, 4-way set associative, 128 entries"),
 CACHE_DESC(CPUID_CACHE_ICACHE_8K,	L1I,	8*1024, 	32, \
 	"Instruction L1 cache, 8K, 4-way set associative, 32byte line size"),
@@ -150,75 +144,75 @@ CACHE_DESC(CPUID_CACHE_ICACHE_16K,	L1I,	16*1024,	 32, \
 	"Instruction L1 cache, 16K, 4-way set associative, 32byte line size"),
 CACHE_DESC(CPUID_CACHE_DCACHE_16K,	L1D,	16*1024, 	32, \
 	"Data L1 cache, 16K, 4-way set associative, 32byte line size"),
-CACHE_DESC(CPUID_CACHE_DCACHE_8K_64,	L1D,	8*1024,		64, \
+CACHE_DESC(CPUID_CACHE_DCACHE_8K_4_64,	L1D,	8*1024,		64, \
 	"Data L1 cache, 8K, 4-way set associative, 64byte line size"),
-CACHE_DESC(CPUID_CACHE_DCACHE_16K_64,	L1D,	16*1024,	64, \
+CACHE_DESC(CPUID_CACHE_DCACHE_16K_4_64,	L1D,	16*1024,	64, \
 	"Data L1 cache, 16K, 4-way set associative, 64byte line size"),
-CACHE_DESC(CPUID_CACHE_DCACHE_32K_64,	L1D,	32*1024,	64, \
+CACHE_DESC(CPUID_CACHE_DCACHE_32K_4_64,	L1D,	32*1024,	64, \
 	"Data L1 cache, 32K, 4-way set associative, 64byte line size"),
 CACHE_DESC(CPUID_CACHE_DCACHE_32K,      L1D,    32*1024,        64, \
         "Data L1 cache, 32K, 8-way set assocative, 64byte line size"),
 CACHE_DESC(CPUID_CACHE_ICACHE_32K,      L1I,    32*1024,        64, \
         "Instruction L1 cache, 32K, 8-way set associative, 64byte line size"),
-CACHE_DESC(CPUID_CACHE_DCACHE_16K_8,    L1D,    16*1024,        64, \
+CACHE_DESC(CPUID_CACHE_DCACHE_16K_8_64,    L1D,    16*1024,        64, \
         "Data L1 cache, 16K, 8-way set associative, 64byte line size"),
-CACHE_DESC(CPUID_CACHE_TRACE_12K,	L1I,	12*1024,	64, \
+CACHE_DESC(CPUID_CACHE_TRACE_12K_8,	L1I,	12*1024,	64, \
 	"Trace cache, 12K-uop, 8-way set associative"),
-CACHE_DESC(CPUID_CACHE_TRACE_16K,	L1I,	16*1024,	64, \
+CACHE_DESC(CPUID_CACHE_TRACE_16K_8,	L1I,	16*1024,	64, \
 	"Trace cache, 16K-uop, 8-way set associative"),
-CACHE_DESC(CPUID_CACHE_TRACE_32K,	L1I,	32*1024,	64, \
+CACHE_DESC(CPUID_CACHE_TRACE_32K_8,	L1I,	32*1024,	64, \
 	"Trace cache, 32K-uop, 8-way set associative"),
-CACHE_DESC(CPUID_CACHE_UCACHE_128K,	L2U,	128*1024,	32, \
+CACHE_DESC(CPUID_CACHE_L2_128K,	L2U,	128*1024,	32, \
 	"Unified L2 cache, 128K, 4-way set associative, 32byte line size"),
-CACHE_DESC(CPUID_CACHE_UCACHE_256K,	L2U,	128*1024,	32, \
+CACHE_DESC(CPUID_CACHE_L2_256K,	L2U,	128*1024,	32, \
 	"Unified L2 cache, 256K, 4-way set associative, 32byte line size"),
-CACHE_DESC(CPUID_CACHE_UCACHE_512K,	L2U,	512*1024,	32, \
+CACHE_DESC(CPUID_CACHE_L2_512K,	L2U,	512*1024,	32, \
 	"Unified L2 cache, 512K, 4-way set associative, 32byte line size"),
-CACHE_DESC(CPUID_CACHE_UCACHE_1M,	L2U,	1*1024*1024,	32, \
+CACHE_DESC(CPUID_CACHE_L2_1M_4,	L2U,	1*1024*1024,	32, \
 	"Unified L2 cache, 1M, 4-way set associative, 32byte line size"),
-CACHE_DESC(CPUID_CACHE_UCACHE_2M,	L2U,	2*1024*1024,	32, \
+CACHE_DESC(CPUID_CACHE_L2_2M_4,	L2U,	2*1024*1024,	32, \
 	"Unified L2 cache, 2M, 4-way set associative, 32byte line size"),
-CACHE_DESC(CPUID_CACHE_UCACHE_4M,	L2U,	4*1024*1024,	64, \
+CACHE_DESC(CPUID_CACHE_L2_4M_16_64,	L2U,	4*1024*1024,	64, \
 	"Unified L2 cache, 4M, 16-way set associative, 64byte line size"),
-CACHE_DESC(CPUID_CACHE_UCACHE_128K_64,	L2U,	128*1024,	64, \
+CACHE_DESC(CPUID_CACHE_L2_128K_8_64_2,	L2U,	128*1024,	64, \
 	"Unified L2 cache, 128K, 8-way set associative, 64byte line size"),
-CACHE_DESC(CPUID_CACHE_UCACHE_256K_64,	L2U,	256*1024,	64, \
+CACHE_DESC(CPUID_CACHE_L2_256K_8_64_2,	L2U,	256*1024,	64, \
 	"Unified L2 cache, 256K, 8-way set associative, 64byte line size"),
-CACHE_DESC(CPUID_CACHE_UCACHE_512K_64,	L2U,	512*1024,	64, \
+CACHE_DESC(CPUID_CACHE_L2_512K_8_64_2,	L2U,	512*1024,	64, \
 	"Unified L2 cache, 512K, 8-way set associative, 64byte line size"),
-CACHE_DESC(CPUID_CACHE_UCACHE_1M_64,	L2U,	1*1024*1024,	64, \
+CACHE_DESC(CPUID_CACHE_L2_1M_8_64_2,	L2U,	1*1024*1024,	64, \
 	"Unified L2 cache, 1M, 8-way set associative, 64byte line size"),
-CACHE_DESC(CPUID_CACHE_UCACHE_256K_32,	L2U,	256*1024,	32, \
+CACHE_DESC(CPUID_CACHE_L2_256K_8_32,	L2U,	256*1024,	32, \
 	"Unified L2 cache, 256K, 8-way set associative, 32byte line size"),
-CACHE_DESC(CPUID_CACHE_UCACHE_512K_32,	L2U,	512*1024,	32, \
+CACHE_DESC(CPUID_CACHE_L2_512K_8_32,	L2U,	512*1024,	32, \
 	"Unified L2 cache, 512K, 8-way set associative, 32byte line size"),
-CACHE_DESC(CPUID_CACHE_UCACHE_1M_32,	L2U,	1*1024*1024,	32, \
+CACHE_DESC(CPUID_CACHE_L2_1M_8_32,	L2U,	1*1024*1024,	32, \
 	"Unified L2 cache, 1M, 8-way set associative, 32byte line size"),
-CACHE_DESC(CPUID_CACHE_UCACHE_2M_32,	L2U,	2*1024*1024,	32, \
+CACHE_DESC(CPUID_CACHE_L2_2M_8_32,	L2U,	2*1024*1024,	32, \
 	"Unified L2 cache, 2M, 8-way set associative, 32byte line size"),
-CACHE_DESC(CPUID_CACHE_UCACHE_1M_64_4,  L2U,    1*1024*1024,    64, \
+CACHE_DESC(CPUID_CACHE_L2_1M_4_64,  L2U,    1*1024*1024,    64, \
         "Unified L2 cache, 1M, 4-way set associative, 64byte line size"),
-CACHE_DESC(CPUID_CACHE_UCACHE_2M_64,    L2U,    2*1024*1024,    64, \
+CACHE_DESC(CPUID_CACHE_L2_2M_8_64,    L2U,    2*1024*1024,    64, \
         "Unified L2 cache, 2M, 8-way set associative, 64byte line size"),
-CACHE_DESC(CPUID_CACHE_UCACHE_512K_64_2,L2U,    512*1024,       64, \
+CACHE_DESC(CPUID_CACHE_L2_512K_2_64,L2U,    512*1024,       64, \
         "Unified L2 cache, 512K, 2-way set associative, 64byte line size"),
-CACHE_DESC(CPUID_CACHE_UCACHE_512K_64_4,L2U,    512*1024,       64, \
+CACHE_DESC(CPUID_CACHE_L2_512K_4_64,L2U,    512*1024,       64, \
         "Unified L2 cache, 512K, 4-way set associative, 64byte line size"),
-CACHE_DESC(CPUID_CACHE_UCACHE_1M_64_8,  L2U,    1*1024*1024,    64, \
+CACHE_DESC(CPUID_CACHE_L2_1M_8_64,  L2U,    1*1024*1024,    64, \
         "Unified L2 cache, 1M, 8-way set associative, 64byte line size"),
-CACHE_DESC(CPUID_CACHE_UCACHE_128K_S4,  L2U,    128*1024,       64, \
+CACHE_DESC(CPUID_CACHE_L2_128K_S4,  L2U,    128*1024,       64, \
         "Unified L2 sectored cache, 128K, 4-way set associative, 64byte line size"),
-CACHE_DESC(CPUID_CACHE_UCACHE_128K_S2,  L2U,    128*1024,       64, \
+CACHE_DESC(CPUID_CACHE_L2_128K_S2,  L2U,    128*1024,       64, \
         "Unified L2 sectored cache, 128K, 2-way set associative, 64byte line size"),
-CACHE_DESC(CPUID_CACHE_UCACHE_256K_S4,  L2U,    256*1024,       64, \
+CACHE_DESC(CPUID_CACHE_L2_256K_S4,  L2U,    256*1024,       64, \
         "Unified L2 sectored cache, 256K, 4-way set associative, 64byte line size"),
-CACHE_DESC(CPUID_CACHE_L3CACHE_512K,    L3U,    512*1024,       64, \
+CACHE_DESC(CPUID_CACHE_L3_512K,    L3U,    512*1024,       64, \
         "Unified L3 cache, 512K, 4-way set associative, 64byte line size"),
-CACHE_DESC(CPUID_CACHE_L3CACHE_1M,      L3U,    1*1024*1024,    64, \
+CACHE_DESC(CPUID_CACHE_L3_1M,      L3U,    1*1024*1024,    64, \
         "Unified L3 cache, 1M, 8-way set associative, 64byte line size"),
-CACHE_DESC(CPUID_CACHE_L3CACHE_2M,      L3U,    2*1024*1024,    64, \
+CACHE_DESC(CPUID_CACHE_L3_2M,      L3U,    2*1024*1024,    64, \
         "Unified L3 cache, 2M, 8-way set associative, 64byte line size"),
-CACHE_DESC(CPUID_CACHE_L3CACHE_4M,      L3U,    4*1024*1024,    64, \
+CACHE_DESC(CPUID_CACHE_L3_4M,      L3U,    4*1024*1024,    64, \
         "Unified L3 cache, 4M, 8-way set associative, 64byte line size"),
 CACHE_DESC(CPUID_CACHE_PREFETCH_64,     Lnone,  0,              0,  \
         "64-Byte Prefetching"),
@@ -677,6 +671,11 @@ static struct {
 	{CPUID_FEATURE_CID,     "CID"},
 	{CPUID_FEATURE_CX16,    "CX16"},
 	{CPUID_FEATURE_xTPR,    "TPR"},
+	{CPUID_FEATURE_PDCM,    "PDCM"},
+	{CPUID_FEATURE_DCA,     "DCA"},
+	{CPUID_FEATURE_SSE4_1,  "SSE4.1"},
+	{CPUID_FEATURE_SSE4_2,  "SSE4.2"},
+	{CPUID_FEATURE_POPCNT,  "POPCNT"},
 	{0, 0}
 },
 extfeature_map[] = {

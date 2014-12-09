@@ -1,29 +1,23 @@
 /*
  * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * @APPLE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. The rights granted to you under the License
- * may not be used to create, or enable the creation or redistribution of,
- * unlawful or unlicensed copies of an Apple operating system, or to
- * circumvent, violate, or enable the circumvention or violation of, any
- * terms of an Apple operating system software license agreement.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
- * Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this file.
- * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
- * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ * @APPLE_LICENSE_HEADER_END@
  */
 /* Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved */
 /*
@@ -393,7 +387,7 @@ fhopen( proc_t p,
 	vnode_put(vp);
 
 	proc_fdlock(p);
-	*fdflags(p, indx) &= ~UF_RESERVED;
+	procfdtbl_releasefd(p, indx, NULL);
 	fp_drop(p, indx, fp, 1);
 	proc_fdunlock(p);
 
@@ -708,7 +702,7 @@ nfskerb_clientd(
 		    error = tsleep((caddr_t)&nmp->nm_authstr, PSOCK | PCATCH,
 			"nfskrbtimr", hz / 3);
 		    if (error == EINTR || error == ERESTART)
-			    dounmount(nmp->nm_mountp, 0, NULL, p);
+			    dounmount(nmp->nm_mountp, 0, NULL, 0, p);
 	    }
 	}
 
@@ -960,6 +954,8 @@ nfssvc_nfsd(nsd, argp, p)
 		}
 		if (error || (slp->ns_flag & SLP_VALID) == 0) {
 			if (nd) {
+				if (nd->nd_mrep)
+					mbuf_freem(nd->nd_mrep);
 				if (nd->nd_nam2)
 					mbuf_freem(nd->nd_nam2);
 				if (IS_VALID_CRED(nd->nd_cr))
@@ -1041,8 +1037,11 @@ nfssvc_nfsd(nsd, argp, p)
 			lck_rw_lock_shared(&nfs_export_rwlock);
 			if (writes_todo || ((nd->nd_procnum == NFSPROC_WRITE) && (procrastinate > 0)))
 			    error = nfsrv_writegather(&nd, slp, nfsd->nfsd_procp, &mreq);
-			else
+			else {
 			    error = (*(nfsrv3_procs[nd->nd_procnum]))(nd, slp, nfsd->nfsd_procp, &mreq);
+			    if (mreq == NULL)
+			    	nd->nd_mrep = NULL;
+			}
 			lck_rw_done(&nfs_export_rwlock);
 			if (mreq == NULL)
 				break;
@@ -1053,6 +1052,7 @@ nfssvc_nfsd(nsd, argp, p)
 					mbuf_freem(nd->nd_nam2);
 					nd->nd_nam2 = NULL;
 				}
+				nd->nd_mrep = NULL;
 				break;
 			}
 			OSAddAtomic(1, (SInt32*)&nfsstats.srvrpccnt[nd->nd_procnum]);

@@ -1,29 +1,23 @@
 /*
  * Copyright (c) 2000-2006 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+ * @APPLE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. The rights granted to you under the License
- * may not be used to create, or enable the creation or redistribution of,
- * unlawful or unlicensed copies of an Apple operating system, or to
- * circumvent, violate, or enable the circumvention or violation of, any
- * terms of an Apple operating system software license agreement.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
- * Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this file.
- * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
- * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ * @APPLE_LICENSE_HEADER_END@
  */
 /*
  * @OSF_COPYRIGHT@
@@ -1596,24 +1590,29 @@ pmap_reference(
 static void
 pmap_remove_range(
 	pmap_t			pmap,
-	vm_map_offset_t		vaddr,
+	vm_map_offset_t		start_vaddr,
 	pt_entry_t		*spte,
 	pt_entry_t		*epte)
 {
 	register pt_entry_t	*cpte;
-	int			num_removed, num_unwired;
+	int			num_removed, num_unwired, num_found;
 	int			pai;
 	pmap_paddr_t		pa;
+	vm_map_offset_t         vaddr;
 
 	num_removed = 0;
 	num_unwired = 0;
+	num_found = 0;
 
-	for (cpte = spte; cpte < epte;
-	     cpte++, vaddr += PAGE_SIZE) {
+	/* invalidate the PTEs first to "freeze" them */
+	for (cpte = spte, vaddr = start_vaddr;
+	     cpte < epte;
+	     cpte++, vaddr += PAGE_SIZE_64) {
 
 	    pa = pte_to_pa(*cpte);
 	    if (pa == 0)
 		continue;
+	    num_found++;
 
 	    if (iswired(*cpte))
 		num_unwired++;
@@ -1624,28 +1623,46 @@ pmap_remove_range(
 		 *	Outside range of managed physical memory.
 		 *	Just remove the mappings.
 		 */
-		register pt_entry_t	*lpte = cpte;
-
-		pmap_store_pte(lpte, 0);
+		pmap_store_pte(cpte, 0);
 		continue;
 	    }
-	    num_removed++;
+
+	    /* invalidate the PTE */
+	    pmap_update_pte(cpte, *cpte, (*cpte & ~INTEL_PTE_VALID));
+	}
+
+	if (0 == num_found) {
+	  /* nothing was changed, we're done */
+	  goto update_counts;
+	}
+
+	/* propagate the invalidates to other CPUs */
+
+	PMAP_UPDATE_TLBS(pmap, start_vaddr, vaddr);
+
+	for (cpte = spte, vaddr = start_vaddr;
+	     cpte < epte;
+	     cpte++, vaddr += PAGE_SIZE_64) {
+
+	    pa = pte_to_pa(*cpte);
+	    if (pa == 0)
+		continue;
 
 	    pai = pa_index(pa);
+
 	    LOCK_PVH(pai);
 
+	    num_removed++;
+
 	    /*
-	     *	Get the modify and reference bits.
+	     *	Get the modify and reference bits, then
+	     *  nuke the entry in the page table
 	     */
-	    {
-		register pt_entry_t	*lpte;
-
-		lpte = cpte;
-		pmap_phys_attributes[pai] |=
-			*lpte & (PHYS_MODIFIED|PHYS_REFERENCED);
-		pmap_store_pte(lpte, 0);
-
-	    }
+	    /* remember reference and change */
+	    pmap_phys_attributes[pai] |=
+	      (char)(*cpte & (PHYS_MODIFIED|PHYS_REFERENCED));
+	    /* completely invalidate the PTE */
+	    pmap_store_pte(cpte, 0);
 
 	    /*
 	     *	Remove the mapping from the pvlist for
@@ -1688,6 +1705,7 @@ pmap_remove_range(
 	    }
 	}
 
+ update_counts:
 	/*
 	 *	Update the counts
 	 */
@@ -1695,6 +1713,7 @@ pmap_remove_range(
 	pmap->stats.resident_count -= num_removed;
 	assert(pmap->stats.wired_count >= num_unwired);
 	pmap->stats.wired_count -= num_unwired;
+	return;
 }
 
 /*
@@ -1852,7 +1871,7 @@ pmap_page_protect(
 			        /*
 				 * Remove the mapping, collecting any modify bits.
 				 */
-			        pmap_store_pte(pte, *pte & ~INTEL_PTE_VALID);
+			        pmap_update_pte(pte, *pte, (*pte & ~INTEL_PTE_VALID));
 
 				PMAP_UPDATE_TLBS(pmap, vaddr, vaddr + PAGE_SIZE);
 
@@ -1884,8 +1903,7 @@ pmap_page_protect(
 			        /*
 				 * Write-protect.
 				 */
-			        pmap_store_pte(pte, *pte & ~INTEL_PTE_WRITE);
-
+			        pmap_update_pte(pte, *pte, (*pte & ~INTEL_PTE_WRITE));
 				PMAP_UPDATE_TLBS(pmap, vaddr, vaddr + PAGE_SIZE);
 				/*
 				 * Advance prev.
@@ -1946,6 +1964,7 @@ pmap_protect(
 	vm_map_offset_t		orig_sva;
 	spl_t		spl;
 	boolean_t	set_NX;
+	int num_found = 0;
 
 	if (map == PMAP_NULL)
 		return;
@@ -1978,23 +1997,25 @@ pmap_protect(
 		    if (*spte & INTEL_PTE_VALID) {
 		      
 		        if (prot & VM_PROT_WRITE)
-			    pmap_store_pte(spte, *spte | INTEL_PTE_WRITE);
+			  pmap_update_pte(spte, *spte, (*spte | INTEL_PTE_WRITE));
 			else
-			    pmap_store_pte(spte, *spte & ~INTEL_PTE_WRITE);
+			  pmap_update_pte(spte, *spte, (*spte & ~INTEL_PTE_WRITE));
 
 			if (set_NX == TRUE)
-			    pmap_store_pte(spte, *spte | INTEL_PTE_NX);
+			  pmap_update_pte(spte, *spte, (*spte | INTEL_PTE_NX));
 			else
-			    pmap_store_pte(spte, *spte & ~INTEL_PTE_NX);
+			  pmap_update_pte(spte, *spte, (*spte & ~INTEL_PTE_NX));
+
+			num_found++;
 
 		    }
 		    spte++;
 		}
 	    }
 	    sva = lva;
-	    pde++;
 	}
-	PMAP_UPDATE_TLBS(map, orig_sva, eva);
+	if (num_found)
+	  PMAP_UPDATE_TLBS(map, orig_sva, eva);
 
 	simple_unlock(&map->lock);
 	SPLX(spl);
@@ -2052,6 +2073,7 @@ pmap_enter(
 	pmap_paddr_t            pa = (pmap_paddr_t)i386_ptob(pn);
 	boolean_t		need_tlbflush = FALSE;
 	boolean_t		set_NX;
+	char                    oattr;
 
 	XPR(0x80000000, "%x/%x: pmap_enter %x/%qx/%x\n",
 	    current_thread(),
@@ -2134,13 +2156,9 @@ pmap_enter(
 		}
 	    }
 
-		if (*pte & INTEL_PTE_MOD)
-		    template |= INTEL_PTE_MOD;
-
-		pmap_store_pte(pte, template);
-		pte++;
-
-		need_tlbflush = TRUE;
+	    /* store modified PTE and preserve RC bits */
+	    pmap_update_pte(pte, *pte, template | (*pte & (INTEL_PTE_REF | INTEL_PTE_MOD)));
+	    need_tlbflush = TRUE;
 	    goto Done;
 	}
 
@@ -2171,6 +2189,15 @@ pmap_enter(
 	     *	to overwrite the old one.
 	     */
 
+	  /* invalidate the PTE */
+	  pmap_update_pte(pte, *pte, (*pte & ~INTEL_PTE_VALID));
+	  /* propagate the invalidate everywhere */
+	  PMAP_UPDATE_TLBS(pmap, vaddr, vaddr + PAGE_SIZE);
+	  /* remember reference and change */
+	  oattr = (char)(*pte & (PHYS_MODIFIED | PHYS_REFERENCED));
+	  /* completely invalidate the PTE */
+	  pmap_store_pte(pte,0);
+
 	    if (valid_page(i386_btop(old_pa))) {
 
 		pai = pa_index(old_pa);
@@ -2183,10 +2210,7 @@ pmap_enter(
 		    pmap->stats.wired_count--;
 		}
 
-		    pmap_phys_attributes[pai] |=
-			*pte & (PHYS_MODIFIED|PHYS_REFERENCED);
-
-		pmap_store_pte(pte, 0);
+		pmap_phys_attributes[pai] |= oattr;
 		/*
 		 *	Remove the mapping from the pvlist for
 		 *	this physical page.
@@ -2481,7 +2505,7 @@ pmap_change_wiring(
 	     *	wiring down mapping
 	     */
 	    map->stats.wired_count++;
-	    pmap_store_pte(pte, *pte | INTEL_PTE_WIRED);
+	    pmap_update_pte(pte, *pte, (*pte | INTEL_PTE_WIRED));
 	    pte++;
 	}
 	else if (!wired && iswired(*pte)) {
@@ -2490,7 +2514,7 @@ pmap_change_wiring(
 	     */
 	    assert(map->stats.wired_count >= 1);
 	    map->stats.wired_count--;
-	    pmap_store_pte(pte, *pte & ~INTEL_PTE_WIRED);
+	    pmap_update_pte(pte, *pte, (*pte & ~INTEL_PTE_WIRED));
 	    pte++;
 	}
 
@@ -3079,23 +3103,21 @@ phys_attribute_clear(
 		    register vm_map_offset_t va;
 
 		    va = pv_e->va;
-		    pte = pmap_pte(pmap, va);
 
-#if	0
 		    /*
-		     * Consistency checks.
+		     * first make sure any processor actively
+		     * using this pmap fluses its TLB state
 		     */
-		    assert(*pte & INTEL_PTE_VALID);
-		    /* assert(pte_to_phys(*pte) == phys); */
-#endif
+
+		    PMAP_UPDATE_TLBS(pmap, va, va + PAGE_SIZE);
 
 		/*
 		 * Clear modify or reference bits.
 		 */
 
-			pmap_store_pte(pte, *pte & ~bits);
-			pte++;
-			PMAP_UPDATE_TLBS(pmap, va, va + PAGE_SIZE);
+		    pte = pmap_pte(pmap, va);
+		    pmap_update_pte(pte, *pte, (*pte & ~bits));
+
 		}
 		simple_unlock(&pmap->lock);
 
