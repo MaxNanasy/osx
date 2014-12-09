@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2005 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 1999-2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -118,7 +118,7 @@ DoAgain:
 	//
 	ScavCtrl( &dataArea, scavInitialize, &scavError );
 	if ( checkLevel == kNeverCheck || (checkLevel == kDirtyCheck && dataArea.cleanUnmount) ||
-						scavError == R_NoMem ) {
+						scavError == R_NoMem || scavError == R_BadSig) {
 		// also need to bail when allocate fails in ScavSetUp or we bus error!
 		goto termScav;
 	}
@@ -904,6 +904,11 @@ static int ScavSetUp( SGlob *GPtr)
  	//
  	
  	InitializeVolumeObject( GPtr );
+
+	/* Check if the volume type of initialized object is valid.  If not, return error */
+	if (VolumeObjectIsValid() == false) {
+		return (R_BadSig);
+	}
  	
 	// Keep a valid file id list for HFS volumes
 	GPtr->validFilesList = (UInt32**)NewHandle( 0 );

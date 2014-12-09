@@ -240,7 +240,7 @@ checkfilesys(char * filesys)
 	if (setup( filesys, &blockDevice_fd, &canWrite ) == 0) {
 		if (preen)
 			pfatal("CAN'T CHECK FILE SYSTEM.");
-		result = 0;
+		result = EEXIT;
 		goto ExitThisRoutine;
 	}
 
@@ -406,8 +406,12 @@ setup( char *dev, int *blockDevice_fdPtr, int *canWritePtr )
 	if (preen == 0 && !guiControl)
 		printf("\n");
 
+	/* Get device block size to initialize cache */
+	if (ioctl(fsreadfd, DKIOCGETBLOCKSIZE, &devBlockSize) < 0) {
+		pfatal ("Can't get device block size\n");
+		return (0);
+	}
 	/* Initialize the cache */
-	ioctl(fsreadfd, DKIOCGETBLOCKSIZE, &devBlockSize);
 	if (CacheInit (&fscache, fsreadfd, fswritefd, devBlockSize,
 			CACHE_IOSIZE, CACHE_BLOCKS, CACHE_HASHSIZE) != EOK) {
 		pfatal("Can't initialize disk cache\n");

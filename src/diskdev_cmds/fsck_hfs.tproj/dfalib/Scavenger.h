@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999-2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 1999-2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -1077,6 +1077,7 @@ extern OSErr 	GetVolumeObjectPrimaryMDB( BlockDescriptor * theBlockDescPtr );
 extern OSErr 	GetVolumeObjectVHBorMDB( BlockDescriptor * theBlockDescPtr );
 extern void 	PrintName( int theCount, const UInt8 *theNamePtr, Boolean isUnicodeString );
 extern void 	PrintVolumeObject( void );
+extern Boolean 	VolumeObjectIsValid( void );
 extern Boolean 	VolumeObjectIsHFSPlus( void );
 extern Boolean 	VolumeObjectIsHFS( void );
 extern Boolean 	VolumeObjectIsEmbeddedHFSPlus( void );

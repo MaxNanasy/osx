@@ -1490,6 +1490,36 @@ static void CompareVolHeaderBTreeSizes(	SGlobPtr GPtr,
 
 } /* CompareVolHeaderBTreeSizes */
 
+//******************************************************************************
+//	Routine:	VolumeObjectIsValid
+//
+//	Function:	determine if the volume represented by our VolumeObject is a 
+//				valid volume type (i.e. not unknown type)
+//
+// 	Result:		returns true if volume is known volume type (i.e. HFS, HFS+)
+//				false otherwise.
+//******************************************************************************
+Boolean VolumeObjectIsValid(void)
+{
+	VolumeObjectPtr	myVOPtr = GetVolumeObjectPtr();
+	
+	/* Check if the type is unknown type */
+	if (myVOPtr->volumeType == kUnknownVolumeType) {
+		return(false);
+	} 
+
+	/* Check if it is HFS+ volume */
+	if (VolumeObjectIsHFSPlus() == true) {
+		return(true);
+	}
+		
+	/* Check if it is HFS volume */
+	if (VolumeObjectIsHFS() == true) {
+		return(true);
+	}
+
+	return(false);
+} /* VolumeObjectIsValid */
 
 //******************************************************************************
 //	Routine:	VolumeObjectIsHFSPlus
