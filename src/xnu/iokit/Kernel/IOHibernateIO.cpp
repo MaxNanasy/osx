@@ -2013,7 +2013,7 @@ hibernate_machine_init(void)
 	    gIOHibernateCurrentHeader->diag[0], gIOHibernateCurrentHeader->diag[1], 
 	    gIOHibernateCurrentHeader->diag[2], gIOHibernateCurrentHeader->diag[3]); 
 
-    HIBPRINT("video %lx %ld %ld %ld\n",
+    HIBPRINT("video %x %d %d %d\n",
 	    gIOHibernateGraphicsInfo->physicalAddress, gIOHibernateGraphicsInfo->depth, 
 	    gIOHibernateGraphicsInfo->width, gIOHibernateGraphicsInfo->height); 
 

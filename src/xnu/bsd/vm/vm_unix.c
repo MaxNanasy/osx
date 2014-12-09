@@ -1457,17 +1457,18 @@ clone_system_shared_regions(
 		    */
 		   shared_region_object_chain_attach(
 			   new_shared_region, old_shared_region);
-	   } else {
-		   /*
-		    * We want a completely detached clone with no link to
-		    * the old shared region.  We'll be removing some mappings
-		    * in our private, cloned, shared region, so the old mappings
-		    * will become irrelevant to us.  Since we have a private
-		    * "shared region" now, it isn't going to be shared with
-		    * anyone else and we won't need to maintain mappings info.
-		    */
-		   shared_region_object_chain_detached(new_shared_region);
 	   }
+	}
+	if (!chain_regions) {
+		/*
+		 * We want a completely detached clone with no link to
+		 * the old shared region.  We'll be removing some mappings
+		 * in our private, cloned, shared region, so the old mappings
+		 * will become irrelevant to us.  Since we have a private
+		 * "shared region" now, it isn't going to be shared with
+		 * anyone else and we won't need to maintain mappings info.
+		 */
+		shared_region_object_chain_detached(new_shared_region);
 	}
 	if (vm_map_region_replace(current_map(), old_info.text_region, 
 			new_info.text_region, old_info.client_base, 

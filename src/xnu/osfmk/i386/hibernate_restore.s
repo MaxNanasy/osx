@@ -172,7 +172,7 @@ LEXT(hibernate_machine_entrypoint)
         POSTCODE(0x3)
         
 	movl    %cr4,%eax
-        orl     $(CR4_PAE|CR4_PGE|CR4_MCE),%eax
+        orl     $(CR4_PAE|CR4_PGE),%eax
         movl    %eax,%cr4               /* enable page size extensions */
 
 	movl	$(MSR_IA32_EFER), %ecx			/* MSR number in ecx */

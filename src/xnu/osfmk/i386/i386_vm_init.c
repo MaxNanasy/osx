@@ -191,7 +191,6 @@ i386_vm_init(uint64_t	maxmem,
 	etext = (vm_offset_t) sectTEXTB + sectSizeTEXT;
 	edata = (vm_offset_t) sectDATAB + sectSizeDATA;
 
-	cpuid_set_info();
 	vm_set_page_size();
 
 	/*

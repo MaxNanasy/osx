@@ -109,6 +109,7 @@
 #include <i386/postcode.h>
 #include <i386/mp_desc.h>
 #include <i386/proc_reg.h>
+#include <i386/machine_check.h>
 #include <mach/i386/syscall_sw.h>
 
 /*
@@ -711,6 +712,15 @@ panic_machine_check(int code)
 	 * and record originally faulted instruction address.
 	 */
 	kprintf_break_lock();
+
+	/*
+	 * Dump the contents of the machine check MSRs (if any).
+	 */
+	mca_dump();
+
+	/*
+	 * And that's all folks, we don't attempt recovery...
+	 */
 	panic("Machine-check (CPU:%d, thread:%p, code:0x%x),"
 	      "registers:\n"
 	      "CR0: 0x%08x, CR2: 0x%08x, CR3: 0x%08x, CR4: 0x%08x\n"
@@ -773,11 +783,7 @@ panic_double_fault64(x86_saved_state_t *esp)
 }
 
 /*
- * Simplistic machine check handler.
- * We could peruse all those MSRs but we only dump register state as we do for
- * the double fault exception.
- * Note: the machine check registers are non-volatile across warm boot - so
- * they'll be around when we return.
+ * Machine check handler for 64-bit.
  */
 void
 panic_machine_check64(x86_saved_state_t *esp)
@@ -792,7 +798,12 @@ panic_machine_check64(x86_saved_state_t *esp)
 	kprintf_break_lock();
 
 	/*
-	 * Dump the interrupt stack frame at last kernel entry.
+	 * Dump the contents of the machine check MSRs (if any).
+	 */
+	mca_dump();
+
+	/*
+	 * And that's all folks, we don't attempt recovery...
 	 */
 	if (is_saved_state64(esp)) {
 		x86_saved_state64_t	*ss64p = saved_state64(esp);

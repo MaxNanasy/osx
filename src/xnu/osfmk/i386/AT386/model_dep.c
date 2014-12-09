@@ -129,7 +129,6 @@ extern unsigned int	panic_is_inited;
 int db_run_mode;
 
 static int packAsc (uint8_t *inbuf, unsigned int length);
-extern int kdb_printf(const char *fmt, ...);
 
 volatile int pbtcpu = -1;
 hw_lock_data_t pbtlock;		/* backtrace print lock */

@@ -99,10 +99,6 @@ cpu_init(void)
 {
 	cpu_data_t	*cdp = current_cpu_datap();
 
-	/* be sure cpuid is initialized */
-	cpuid_set_info();
-
-	/* and allow it to be authoritative */
 	cdp->cpu_type = cpuid_cputype();
 	cdp->cpu_subtype = cpuid_cpusubtype();
 

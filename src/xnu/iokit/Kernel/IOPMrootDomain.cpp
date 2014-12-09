@@ -252,7 +252,7 @@ IOPMWorkArbiter *IOPMrootDomain::getPMArbiter(void)
 // expert informs us we are the root.
 // **********************************************************************************
 
-#define kRootDomainSettingsCount        12
+#define kRootDomainSettingsCount        13
 
 bool IOPMrootDomain::start ( IOService * nub )
 {
@@ -271,7 +271,8 @@ bool IOPMrootDomain::start ( IOService * nub )
             OSSymbol::withCString(kIOPMSettingRestartOnPowerLossKey),
             OSSymbol::withCString(kIOPMSettingWakeOnClamshellKey),
             OSSymbol::withCString(kIOPMSettingWakeOnACChangeKey),
-            OSSymbol::withCString(kIOPMSettingTimeZoneOffsetKey)
+            OSSymbol::withCString(kIOPMSettingTimeZoneOffsetKey),
+            OSSymbol::withCString(kIOPMSettingMobileMotionModuleKey)
         };
     
 

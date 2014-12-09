@@ -60,6 +60,7 @@
 
 static unsigned int	cpuid_maxcpuid;
 
+static i386_cpu_info_t	*cpuid_cpu_infop = NULL;
 static i386_cpu_info_t	cpuid_cpu_info;
 
 uint32_t		cpuid_feature;		/* XXX obsolescent for compat */
@@ -686,6 +687,17 @@ extfeature_map[] = {
 	{0, 0}
 };
 
+i386_cpu_info_t	*
+cpuid_info(void)
+{
+	/* Set-up the cpuid_indo stucture lazily */
+	if (cpuid_cpu_infop == NULL) {
+		cpuid_get_info(&cpuid_cpu_info);
+		cpuid_cpu_infop = &cpuid_cpu_info;
+	}
+	return cpuid_cpu_infop;
+}
+
 char *
 cpuid_get_feature_names(uint64_t features, char *buf, unsigned buf_len)
 {
@@ -765,7 +777,7 @@ void
 cpuid_cpu_display(
 	const char	*header)
 {
-    if (cpuid_cpu_info.cpuid_brand_string[0] != '\0') {
+    if (cpuid_info()->cpuid_brand_string[0] != '\0') {
 	kprintf("%s: %s\n", header, cpuid_cpu_info.cpuid_brand_string);
     }
 }
@@ -773,19 +785,19 @@ cpuid_cpu_display(
 unsigned int
 cpuid_family(void)
 {
-	return cpuid_cpu_info.cpuid_family;
+	return cpuid_info()->cpuid_family;
 }
 
 cpu_type_t
 cpuid_cputype(void)
 {
-	return cpuid_cpu_info.cpuid_cpu_type;
+	return cpuid_info()->cpuid_cpu_type;
 }
 
 cpu_subtype_t
 cpuid_cpusubtype(void)
 {
-	return cpuid_cpu_info.cpuid_cpu_subtype;
+	return cpuid_info()->cpuid_cpu_subtype;
 }
 
 uint64_t
@@ -793,6 +805,8 @@ cpuid_features(void)
 {
 	static int checked = 0;
 	char	fpu_arg[16] = { 0 };
+
+	(void) cpuid_info();
 	if (!checked) {
 		    /* check for boot-time fpu limitations */
 			if (PE_parse_boot_arg("_fpu", &fpu_arg[0])) {
@@ -813,15 +827,9 @@ cpuid_features(void)
 uint64_t
 cpuid_extfeatures(void)
 {
-	return cpuid_cpu_info.cpuid_extfeatures;
+	return cpuid_info()->cpuid_extfeatures;
 }
  
-i386_cpu_info_t	*
-cpuid_info(void)
-{
-	return &cpuid_cpu_info;
-}
-
 void
 cpuid_set_info(void)
 {

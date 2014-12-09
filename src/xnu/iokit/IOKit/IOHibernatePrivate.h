@@ -155,14 +155,14 @@ enum
 
 struct hibernate_graphics_t
 {
-    unsigned long physicalAddress;	// Base address of video memory
-    unsigned long mode;    		// 
-    unsigned long rowBytes;   		// Number of bytes per pixel row
-    unsigned long width;      		// Width
-    unsigned long height;     		// Height
-    unsigned long depth;      		// Pixel Depth
+    uint32_t physicalAddress;		// Base address of video memory
+    uint32_t mode;			// 
+    uint32_t rowBytes;   		// Number of bytes per pixel row
+    uint32_t width;      		// Width
+    uint32_t height;     		// Height
+    uint32_t depth;      		// Pixel Depth
 
-    uint8_t	  progressSaveUnder[kIOHibernateProgressCount][kIOHibernateProgressSaveUnderSize];
+    uint8_t progressSaveUnder[kIOHibernateProgressCount][kIOHibernateProgressSaveUnderSize];
 };
 typedef struct hibernate_graphics_t hibernate_graphics_t;
 

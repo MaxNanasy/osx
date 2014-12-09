@@ -34,6 +34,7 @@
 #include <i386/fpu.h>
 #include <i386/mp.h>
 #include <i386/mp_desc.h>
+#include <i386/machine_check.h>
 
 #include <kern/cpu_data.h>
 
@@ -162,6 +163,9 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
     } else {
 	fast_syscall_init();
     }
+
+    /* Re-enable machine check handling */
+    mca_cpu_init();
 
     /* restore MTRR settings */
     mtrr_update_cpu();

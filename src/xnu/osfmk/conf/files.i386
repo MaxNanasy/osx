@@ -58,6 +58,7 @@ osfmk/i386/lowmem_vectors.s	standard
 osfmk/i386/cswitch.s	standard
 osfmk/i386/machine_routines.c		standard
 osfmk/i386/machine_routines_asm.s	standard
+osfmk/i386/machine_check.c	standard
 osfmk/i386/mcount.s		optional profile
 osfmk/i386/mp_desc.c		standard
 osfmk/i386/ntoh.s		standard

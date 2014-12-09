@@ -132,13 +132,16 @@ decl_simple_lock_data(,mp_kdp_lock);
 decl_mutex_data(static, mp_cpu_boot_lock);
 
 /* Variables needed for MP rendezvous. */
+decl_simple_lock_data(,mp_rv_lock);
 static void		(*mp_rv_setup_func)(void *arg);
 static void		(*mp_rv_action_func)(void *arg);
 static void		(*mp_rv_teardown_func)(void *arg);
 static void		*mp_rv_func_arg;
 static int		mp_rv_ncpus;
-static volatile long	mp_rv_waiters[2];
-decl_simple_lock_data(,mp_rv_lock);
+			/* Cache-aligned barriers: */
+static volatile long	mp_rv_entry    __attribute__((aligned(64)));
+static volatile long	mp_rv_exit     __attribute__((aligned(64)));
+static volatile long	mp_rv_complete __attribute__((aligned(64)));
 
 int		lapic_to_cpu[MAX_CPUS];
 int		cpu_to_lapic[MAX_CPUS];
@@ -257,7 +260,8 @@ smp_init(void)
 
 	/* Establish a map to the local apic */
 	lapic_start = vm_map_min(kernel_map);
-	result = vm_map_find_space(kernel_map, &lapic_start,
+	result = vm_map_find_space(kernel_map,
+				   (vm_map_address_t *) &lapic_start,
 				   round_page(LAPIC_SIZE), 0,
 				   VM_MAKE_TAG(VM_MEMORY_IOKIT), &entry);
 	if (result != KERN_SUCCESS) {
@@ -1066,8 +1070,8 @@ mp_rendezvous_action(void)
 	if (mp_rv_setup_func != NULL)
 		mp_rv_setup_func(mp_rv_func_arg);
 	/* spin on entry rendezvous */
-	atomic_incl(&mp_rv_waiters[0], 1);
-	while (mp_rv_waiters[0] < mp_rv_ncpus) {
+	atomic_incl(&mp_rv_entry, 1);
+	while (mp_rv_entry < mp_rv_ncpus) {
 		boolean_t intr = ml_set_interrupts_enabled(FALSE);
 		/* poll for pesky tlb flushes */
 		handle_pending_TLB_flushes();
@@ -1078,12 +1082,16 @@ mp_rendezvous_action(void)
 	if (mp_rv_action_func != NULL)
 		mp_rv_action_func(mp_rv_func_arg);
 	/* spin on exit rendezvous */
-	atomic_incl(&mp_rv_waiters[1], 1);
-	while (mp_rv_waiters[1] < mp_rv_ncpus)
+	atomic_incl(&mp_rv_exit, 1);
+	while (mp_rv_exit < mp_rv_ncpus)
 		cpu_pause();
+
 	/* teardown function */
 	if (mp_rv_teardown_func != NULL)
 		mp_rv_teardown_func(mp_rv_func_arg);
+
+	/* Bump completion count */
+	atomic_incl(&mp_rv_complete, 1);
 }
 
 void
@@ -1112,19 +1120,28 @@ mp_rendezvous(void (*setup_func)(void *),
 	mp_rv_teardown_func = teardown_func;
 	mp_rv_func_arg = arg;
 
-	mp_rv_waiters[0] = 0;		/* entry rendezvous count */
-	mp_rv_waiters[1] = 0;		/* exit  rendezvous count */
-	mp_rv_ncpus = i386_active_cpus();
+	mp_rv_entry    = 0;
+	mp_rv_exit     = 0;
+	mp_rv_complete = 0;
 
 	/*
 	 * signal other processors, which will call mp_rendezvous_action()
-	 * with interrupts disabled
 	 */
+	mp_rv_ncpus = i386_active_cpus();
 	i386_signal_cpus(MP_RENDEZVOUS, ASYNC);
 
 	/* call executor function on this cpu */
 	mp_rendezvous_action();
 
+	/*
+	 * Spin for everyone to complete.
+	 * This is necessary to ensure that all processors have proceeded
+	 * from the exit barrier before we release the rendezvous structure.
+	 */
+	while (mp_rv_complete < mp_rv_ncpus) {
+		cpu_pause();
+	}
+	
 	/* release lock */
 	simple_unlock(&mp_rv_lock);
 }
@@ -1179,7 +1196,6 @@ handle_pending_TLB_flushes(void)
 		pmap_update_interrupt();
 	}
 }
-
 
 #if	MACH_KDP
 volatile boolean_t	mp_kdp_trap = FALSE;
@@ -1289,7 +1305,7 @@ mp_kdp_wait(void)
 
 		cpu_pause();
 	}
-	atomic_decl(&mp_kdp_ncpus, 1);
+	atomic_decl((volatile long *)&mp_kdp_ncpus, 1);
 	DBG("mp_kdp_wait() done\n");
 }
 
@@ -1297,7 +1313,7 @@ void
 mp_kdp_exit(void)
 {
 	DBG("mp_kdp_exit()\n");
-	atomic_decl(&mp_kdp_ncpus, 1);
+	atomic_decl((volatile long *)&mp_kdp_ncpus, 1);
 	mp_kdp_trap = FALSE;
 	__asm__ volatile("mfence");
 
@@ -1394,7 +1410,7 @@ mp_kdb_wait(void)
 
 		cpu_pause();
 	}
-	atomic_decl(&mp_kdb_ncpus, 1);
+	atomic_decl((volatile long *)&mp_kdb_ncpus, 1);
 	DBG("mp_kdb_wait() done\n");
 }
 
@@ -1414,7 +1430,7 @@ void
 mp_kdb_exit(void)
 {
 	DBG("mp_kdb_exit()\n");
-	atomic_decl(&mp_kdb_ncpus, 1);
+	atomic_decl((volatile long *)&mp_kdb_ncpus, 1);
 	mp_kdb_trap = FALSE;
 	__asm__ volatile("mfence");
 
@@ -1459,8 +1475,9 @@ i386_init_slave(void)
 		fast_syscall_init();
 	}
 
-	lapic_init();
+	mca_cpu_init();
 
+	lapic_init();
 	LAPIC_DUMP();
 	LAPIC_CPU_MAP_DUMP();
 

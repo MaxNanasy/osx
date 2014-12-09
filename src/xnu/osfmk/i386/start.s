@@ -507,7 +507,7 @@ fix_ldt_ret:
 	movl	%eax, %cr3
 
 	movl	%cr4, %eax
-	orl	$(CR4_PAE|CR4_PGE|CR4_MCE), %eax
+	orl	$(CR4_PAE|CR4_PGE), %eax
 	movl	%eax, %cr4
 
 	movl	$0x80000001, %eax
@@ -600,7 +600,7 @@ LEXT(slave_pstart)
  */
 #ifdef PAE
 	movl	%cr4, %eax
-	orl	$(CR4_PAE|CR4_PGE|CR4_MCE), %eax
+	orl	$(CR4_PAE|CR4_PGE), %eax
 	movl	%eax, %cr4
 
 	movl	$(MSR_IA32_EFER), %ecx			/* MSR number in ecx */

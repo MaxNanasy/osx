@@ -86,6 +86,7 @@
 #include <i386/mp.h>
 #include <i386/mp_desc.h>
 #include <i386/machine_routines.h>
+#include <i386/machine_check.h>
 #include <i386/postcode.h>
 #include <i386/Diagnostics.h>
 #include <i386/pmCPU.h>
@@ -123,6 +124,9 @@ i386_init(vm_offset_t boot_args_start)
 	postcode(I386_INIT_ENTRY);
 
 	i386_macho_zerofill();
+
+	/* Initialize machine-check handling */
+	mca_cpu_init();
 
 	/*
 	 * Setup boot args given the physical start address.

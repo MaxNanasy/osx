@@ -107,7 +107,7 @@ extern void printf(const char *format, ...);
 
 extern void dbugprintf(const char *format, ...);
 
-extern void kdp_printf(const char *format, ...);
+extern void kdb_printf(const char *format, ...);
 
 extern void printf_init(void);
 

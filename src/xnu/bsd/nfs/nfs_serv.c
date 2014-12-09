@@ -2357,12 +2357,9 @@ retry:
 
 	/* reset credential if it was remapped */
 	if (nfsd->nd_cr != saved_cred) {
+		kauth_cred_ref(saved_cred);
 		kauth_cred_unref(&nfsd->nd_cr);
-		/*
-		 * consume reference taken above
-		 */
 		nfsd->nd_cr = saved_cred;
-		saved_cred = NULL;
 	}
 
 	tond.ni_cnd.cn_nameiop = RENAME;
