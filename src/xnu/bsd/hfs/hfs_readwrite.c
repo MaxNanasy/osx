@@ -1,31 +1,29 @@
 /*
  * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code 
- * as defined in and that are subject to the Apple Public Source License 
- * Version 2.0 (the 'License'). You may not use this file except in 
- * compliance with the License.  The rights granted to you under the 
- * License may not be used to create, or enable the creation or 
- * redistribution of, unlawful or unlicensed copies of an Apple operating 
- * system, or to circumvent, violate, or enable the circumvention or 
- * violation of, any terms of an Apple operating system software license 
- * agreement.
- *
- * Please obtain a copy of the License at 
- * http://www.opensource.apple.com/apsl/ and read it before using this 
- * file.
- *
- * The Original Code and all software distributed under the License are 
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
- * Please see the License for the specific language governing rights and 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
  * limitations under the License.
- *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 /*	@(#)hfs_readwrite.c	1.0
  *
@@ -48,6 +46,8 @@
 #include <sys/vnode.h>
 #include <sys/uio.h>
 #include <sys/vfs_context.h>
+#include <sys/disk.h>
+#include <sys/sysctl.h>
 
 #include <miscfs/specfs/specdev.h>
 
@@ -82,6 +82,10 @@ extern int  hfs_setextendedsecurity(struct hfsmount *, int);
 static int  hfs_clonelink(struct vnode *, int, kauth_cred_t, struct proc *);
 static int  hfs_clonefile(struct vnode *, int, int, int);
 static int  hfs_clonesysfile(struct vnode *, int, int, int, kauth_cred_t, struct proc *);
+
+
+int flush_cache_on_write = 0;
+SYSCTL_INT (_kern, OID_AUTO, flush_cache_on_write, CTLFLAG_RW, &flush_cache_on_write, 0, "always flush the drive cache on writes to uncached files");
 
 
 /*****************************************************************************
@@ -471,6 +475,13 @@ sizeok:
 			cp->c_touch_chgtime = TRUE;
 			cp->c_touch_modtime = TRUE;
 		}
+	}
+
+	// XXXdbg - testing for vivek and paul lambert
+	{
+	    if (flush_cache_on_write && ((ioflag & IO_NOCACHE) || vnode_isnocache(vp))) {
+		VNOP_IOCTL(hfsmp->hfs_devvp, DKIOCSYNCHRONIZECACHE, NULL, FWRITE, NULL);
+	    }
 	}
 	HFS_KNOTE(vp, NOTE_WRITE);
 
@@ -1083,7 +1094,7 @@ hfs_vnop_ioctl( struct vnop_ioctl_args /* {
 		dev_t dev = VTOC(vp)->c_dev;
 		
 		short flags;
-		struct ucred myucred;	/* XXX ILLEGAL */
+		struct ucred myucred;
 		int num_files;
 		int *file_ids = NULL;
 		short *access = NULL;
@@ -1096,6 +1107,9 @@ hfs_vnop_ioctl( struct vnop_ioctl_args /* {
 		CatalogKey catkey;
 		struct cnode *skip_cp = VTOC(vp);
 		struct vfs_context	my_context;
+
+		/* set up front for common exit code */
+		my_context.vc_ucred = NOCRED;
 
 		/* first, return error if not run as root */
 		if (cred->cr_ruid != 0) {
@@ -1167,6 +1181,12 @@ hfs_vnop_ioctl( struct vnop_ioctl_args /* {
 			check_leaf = false;
 		}
 		
+		/*
+		 * Create a templated credential; this credential may *NOT*
+		 * be used unless instantiated with a kauth_cred_create();
+		 * there must be a correcponding kauth_cred_unref() when it
+		 * is no longer in use (i.e. before it goes out of scope).
+		 */
 		memset(&myucred, 0, sizeof(myucred));
 		myucred.cr_ref = 1;
 		myucred.cr_uid = myucred.cr_ruid = myucred.cr_svuid = user_access_structp->uid;
@@ -1181,7 +1201,7 @@ hfs_vnop_ioctl( struct vnop_ioctl_args /* {
 		myucred.cr_gmuid = myucred.cr_uid;
 		
 		my_context.vc_proc = p;
-		my_context.vc_ucred = &myucred;
+		my_context.vc_ucred = kauth_cred_create(&myucred);
 
 		/* Check access to each file_id passed in */
 		for (i = 0; i < num_files; i++) {
@@ -1189,7 +1209,7 @@ hfs_vnop_ioctl( struct vnop_ioctl_args /* {
 			cnid = (cnid_t) file_ids[i];
 			
 			/* root always has access */
-			if (!suser(&myucred, NULL)) {
+			if (!suser(my_context.vc_ucred, NULL)) {
 				access[i] = 0;
 				continue;
 			}
@@ -1205,7 +1225,7 @@ hfs_vnop_ioctl( struct vnop_ioctl_args /* {
 							
 				/* before calling CheckAccess(), check the target file for read access */
 				myPerms = DerivePermissionSummary(cnattr.ca_uid, cnattr.ca_gid,
-								  cnattr.ca_mode, hfsmp->hfs_mp, &myucred, p  );
+								  cnattr.ca_mode, hfsmp->hfs_mp, my_context.vc_ucred, p  );
 				
 				
 				/* fail fast if no access */ 
@@ -1226,7 +1246,7 @@ hfs_vnop_ioctl( struct vnop_ioctl_args /* {
 			}
 			
 			myaccess = do_access_check(hfsmp, &error, &cache, catkey.hfsPlus.parentID, 
-						   skip_cp, p, &myucred, dev);
+						   skip_cp, p, my_context.vc_ucred, dev);
 			
 			if ( myaccess ) {
 				access[i] = 0; // have access.. no errors to report
@@ -1252,6 +1272,12 @@ hfs_vnop_ioctl( struct vnop_ioctl_args /* {
 
 			    hfs_unlock(VTOC(vp));
 			    if (vnode_vtype(vp) == VDIR) {
+			    	/*
+				 * XXX This code assumes that none of the
+				 * XXX callbacks from vnode_authorize() will
+				 * XXX take a persistent ref on the context
+				 * XXX credential, which is a bad assumption.
+				 */
 				myErr = vnode_authorize(vp, NULL, (KAUTH_VNODE_SEARCH | KAUTH_VNODE_LIST_DIRECTORY), &my_context);
 			    } else {
 				myErr = vnode_authorize(vp, NULL, KAUTH_VNODE_READ_DATA, &my_context);
@@ -1279,6 +1305,9 @@ hfs_vnop_ioctl( struct vnop_ioctl_args /* {
 		release_pathbuff((char *) cache.haveaccess);
 		release_pathbuff((char *) file_ids);
 		release_pathbuff((char *) access);
+		/* clean up local context, if needed */
+		if (IS_VALID_CRED(my_context.vc_ucred))
+			kauth_cred_unref(&my_context.vc_ucred);
 		
 		return (error);
 	} /* HFS_BULKACCESS */
@@ -1850,6 +1879,10 @@ do_hfs_truncate(struct vnode *vp, off_t length, int flags, int skipsetsize, vfs_
 	if (length < 0)
 		return (EINVAL);
 
+	/* This should only happen with a corrupt filesystem */
+	if ((off_t)fp->ff_size < 0)
+		return (EINVAL);
+
 	if ((!ISHFSPLUS(VTOVCB(vp))) && (length > (off_t)MAXHFSFILESIZE))
 		return (EFBIG);
 
@@ -2160,7 +2193,7 @@ hfs_truncate(struct vnode *vp, off_t length, int flags, int skipsetsize,
 
 	if (length < filebytes) {
 		while (filebytes > length) {
-			if ((filebytes - length) > HFS_BIGFILE_SIZE) {
+			if ((filebytes - length) > HFS_BIGFILE_SIZE && overflow_extents(fp)) {
 		    		filebytes -= HFS_BIGFILE_SIZE;
 			} else {
 		    		filebytes = length;
@@ -2172,7 +2205,7 @@ hfs_truncate(struct vnode *vp, off_t length, int flags, int skipsetsize,
 		}
 	} else if (length > filebytes) {
 		while (filebytes < length) {
-			if ((length - filebytes) > HFS_BIGFILE_SIZE) {
+			if ((length - filebytes) > HFS_BIGFILE_SIZE && overflow_extents(fp)) {
 				filebytes += HFS_BIGFILE_SIZE;
 			} else {
 				filebytes = length;

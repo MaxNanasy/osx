@@ -1,31 +1,29 @@
 /*
  * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code 
- * as defined in and that are subject to the Apple Public Source License 
- * Version 2.0 (the 'License'). You may not use this file except in 
- * compliance with the License.  The rights granted to you under the 
- * License may not be used to create, or enable the creation or 
- * redistribution of, unlawful or unlicensed copies of an Apple operating 
- * system, or to circumvent, violate, or enable the circumvention or 
- * violation of, any terms of an Apple operating system software license 
- * agreement.
- *
- * Please obtain a copy of the License at 
- * http://www.opensource.apple.com/apsl/ and read it before using this 
- * file.
- *
- * The Original Code and all software distributed under the License are 
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
- * Please see the License for the specific language governing rights and 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
  * limitations under the License.
- *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  *
  */
 /*-
@@ -1377,41 +1375,45 @@ kevent_process(struct kqueue *kq,
 	       (kn = TAILQ_FIRST(&kq->kq_head)) != NULL) {
 
 		/*
-		 * move knote to the processed queue.
-		 * this is also protected by the kq lock.
-		 */
-		assert(kn->kn_tq == &kq->kq_head);
-		TAILQ_REMOVE(&kq->kq_head, kn, kn_tqe);
-		kn->kn_tq = &kq->kq_inprocess;
-		TAILQ_INSERT_TAIL(&kq->kq_inprocess, kn, kn_tqe);
-
-		/*
+		 * Take note off the active queue.
+		 *
 		 * Non-EV_ONESHOT events must be re-validated.
 		 *
 		 * Convert our lock to a use-count and call the event's
 		 * filter routine to update.
 		 *
-		 * If the event is dropping (or no longer valid), we
-		 * already have it off the active queue, so just
-		 * finish the job of deactivating it.
+		 * If the event is valid, or triggered while the kq
+		 * is unlocked, move to the inprocess queue for processing.
 		 */
+
 		if ((kn->kn_flags & EV_ONESHOT) == 0) {
 			int result;
+			knote_deactivate(kn);
 
 			if (kqlock2knoteuse(kq, kn)) {
 				
 				/* call the filter with just a ref */
 				result = kn->kn_fop->f_event(kn, 0);
 
-				if (!knoteuse2kqlock(kq, kn) || result == 0) {
-					knote_deactivate(kn);
+				/* if it's still alive, make sure it's active */
+				if (knoteuse2kqlock(kq, kn) && result) {
+					/* may have been reactivated in filter*/
+					if (!(kn->kn_status & KN_ACTIVE)) {
+						knote_activate(kn);
+					}
+				} else {
 					continue;
 				}
 			} else {
-				knote_deactivate(kn);
 				continue;
 			}
 		}
+
+		/* knote is active: move onto inprocess queue */
+		assert(kn->kn_tq == &kq->kq_head);
+		TAILQ_REMOVE(&kq->kq_head, kn, kn_tqe);
+		kn->kn_tq = &kq->kq_inprocess;
+		TAILQ_INSERT_TAIL(&kq->kq_inprocess, kn, kn_tqe);
 
 		/*
 		 * Got a valid triggered knote with the kqueue

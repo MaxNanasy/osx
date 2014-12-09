@@ -1,31 +1,29 @@
 /*
  * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code 
- * as defined in and that are subject to the Apple Public Source License 
- * Version 2.0 (the 'License'). You may not use this file except in 
- * compliance with the License.  The rights granted to you under the 
- * License may not be used to create, or enable the creation or 
- * redistribution of, unlawful or unlicensed copies of an Apple operating 
- * system, or to circumvent, violate, or enable the circumvention or 
- * violation of, any terms of an Apple operating system software license 
- * agreement.
- *
- * Please obtain a copy of the License at 
- * http://www.opensource.apple.com/apsl/ and read it before using this 
- * file.
- *
- * The Original Code and all software distributed under the License are 
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
- * Please see the License for the specific language governing rights and 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
  * limitations under the License.
- *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 /*
  * @OSF_COPYRIGHT@
@@ -728,6 +726,23 @@ set_thread_state32(thread_t thread, x86_thread_state32_t *ts)
 
 	saved_state = USER_REGS32(thread);
 
+	/*
+	 * Scrub segment selector values:
+	 */
+	if (ts->cs != USER_CS) ts->cs = USER_CS;
+	if (ts->ss == 0) ts->ss = USER_DS;
+	if (ts->ds == 0) ts->ds = USER_DS;
+	if (ts->es == 0) ts->es = USER_DS;
+
+	/* Check segment selectors are safe */
+	if (!valid_user_segment_selectors(ts->cs,
+					  ts->ss,
+					  ts->ds,
+					  ts->es,
+					  ts->fs,
+					  ts->gs))
+		return(KERN_INVALID_ARGUMENT);
+
 	saved_state->eax = ts->eax;
 	saved_state->ebx = ts->ebx;
 	saved_state->ecx = ts->ecx;
@@ -738,10 +753,10 @@ set_thread_state32(thread_t thread, x86_thread_state32_t *ts)
 	saved_state->uesp = ts->esp;
 	saved_state->efl = (ts->eflags & ~EFL_USER_CLEAR) | EFL_USER_SET;
 	saved_state->eip = ts->eip;
-	saved_state->cs = ts->cs ? ts->cs : USER_CS;
-	saved_state->ss = ts->ss ? ts->ss : USER_DS;
-	saved_state->ds = ts->ds ? ts->ds : USER_DS;
-	saved_state->es = ts->es ? ts->es : USER_DS;
+	saved_state->cs = ts->cs;
+	saved_state->ss = ts->ss;
+	saved_state->ds = ts->ds;
+	saved_state->es = ts->es;
 	saved_state->fs = ts->fs;
 	saved_state->gs = ts->gs;
 

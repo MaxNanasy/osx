@@ -303,6 +303,7 @@ _kauth_cred_ref
 _kauth_cred_rele
 _kauth_cred_uid2guid
 _kauth_cred_uid2ntsid
+_kauth_cred_unref
 _kauth_deregister_scope
 _kauth_getgid
 _kauth_getruid

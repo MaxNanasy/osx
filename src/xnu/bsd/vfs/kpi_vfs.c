@@ -1,31 +1,29 @@
 /*
  * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code 
- * as defined in and that are subject to the Apple Public Source License 
- * Version 2.0 (the 'License'). You may not use this file except in 
- * compliance with the License.  The rights granted to you under the 
- * License may not be used to create, or enable the creation or 
- * redistribution of, unlawful or unlicensed copies of an Apple operating 
- * system, or to circumvent, violate, or enable the circumvention or 
- * violation of, any terms of an Apple operating system software license 
- * agreement.
- *
- * Please obtain a copy of the License at 
- * http://www.opensource.apple.com/apsl/ and read it before using this 
- * file.
- *
- * The Original Code and all software distributed under the License are 
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
- * Please see the License for the specific language governing rights and 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
  * limitations under the License.
- *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 /* Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved */
 /*
@@ -1055,14 +1053,18 @@ vfs_context_create(vfs_context_t context)
 	newcontext = (struct vfs_context *)kalloc(sizeof(struct vfs_context));
 
 	if (newcontext) {
+		kauth_cred_t safecred;
 		if (context) {
 			newcontext->vc_proc = context->vc_proc;
-			newcontext->vc_ucred = context->vc_ucred;
+			safecred = context->vc_ucred;
 		} else {
 			newcontext->vc_proc = proc_self();
-			newcontext->vc_ucred = kauth_cred_get();
+			safecred = kauth_cred_get();
 		}
-	   return(newcontext);
+		if (IS_VALID_CRED(safecred))
+			kauth_cred_ref(safecred);
+		newcontext->vc_ucred = safecred;
+		return(newcontext);
 	}
 	return((vfs_context_t)0);	
 }
@@ -1070,8 +1072,11 @@ vfs_context_create(vfs_context_t context)
 int
 vfs_context_rele(vfs_context_t context)
 {
-	if (context)
+	if (context) {
+		if (IS_VALID_CRED(context->vc_ucred))
+			kauth_cred_unref(&context->vc_ucred);
 		kfree(context, sizeof(struct vfs_context));
+	}
 	return(0);
 }
 
@@ -1570,6 +1575,18 @@ vnode_get_filesec(vnode_t vp, kauth_filesec_t *fsecp, vfs_context_t ctx)
 		if ((error == ENOATTR) || (error == ENOENT) || (error == EJUSTRETURN))
 			error = 0;
 		/* either way, we are done */
+		goto out;
+	}
+
+	/*
+	 * To be valid, a kauth_filesec_t must be large enough to hold a zero
+	 * ACE entrly ACL, and if it's larger than that, it must have the right
+	 * number of bytes such that it contains an atomic number of ACEs,
+	 * rather than partial entries.  Otherwise, we ignore it.
+	 */
+	if (!KAUTH_FILESEC_VALID(xsize)) {
+		KAUTH_DEBUG("    ERROR - Bogus kauth_fiilesec_t: %ld bytes", xsize);	
+		error = 0;
 		goto out;
 	}
 				

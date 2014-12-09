@@ -1,31 +1,29 @@
 /*
  * Copyright (c) 2004 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code 
- * as defined in and that are subject to the Apple Public Source License 
- * Version 2.0 (the 'License'). You may not use this file except in 
- * compliance with the License.  The rights granted to you under the 
- * License may not be used to create, or enable the creation or 
- * redistribution of, unlawful or unlicensed copies of an Apple operating 
- * system, or to circumvent, violate, or enable the circumvention or 
- * violation of, any terms of an Apple operating system software license 
- * agreement.
- *
- * Please obtain a copy of the License at 
- * http://www.opensource.apple.com/apsl/ and read it before using this 
- * file.
- *
- * The Original Code and all software distributed under the License are 
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
- * Please see the License for the specific language governing rights and 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
  * limitations under the License.
- *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 #include <stdarg.h>
 #include <sys/param.h>
@@ -954,10 +952,13 @@ static int fsevents_installed = 0;
 static struct lock__bsd__ fsevents_lck;
 
 typedef struct fsevent_handle {
+    UInt32            flags;
+    SInt32            active;
     fs_event_watcher *watcher;
     struct selinfo    si;
 } fsevent_handle;
 
+#define FSEH_CLOSING   0x0001
 
 static int
 fseventsf_read(struct fileproc *fp, struct uio *uio,
@@ -989,15 +990,27 @@ fseventsf_ioctl(struct fileproc *fp, u_long cmd, caddr_t data, struct proc *p)
     pid_t pid = 0;
     fsevent_dev_filter_args *devfilt_args=(fsevent_dev_filter_args *)data;
 
+    OSAddAtomic(1, &fseh->active);
+    if (fseh->flags & FSEH_CLOSING) {
+	OSAddAtomic(-1, &fseh->active);
+	return 0;
+    }
+
     switch (cmd) {
 	case FIONBIO:
 	case FIOASYNC:
-	    return 0;
+	    ret = 0;
+	    break;
 
 	case FSEVENTS_DEVICE_FILTER: {
 	    int new_num_devices;
 	    dev_t *devices_to_watch, *tmp=NULL;
 	    
+	    if (fseh->flags & FSEH_CLOSING) {
+		ret = 0;
+		break;
+	    }
+
 	    if (devfilt_args->num_devices > 256) {
 		ret = EINVAL;
 		break;
@@ -1052,6 +1065,7 @@ fseventsf_ioctl(struct fileproc *fp, u_long cmd, caddr_t data, struct proc *p)
 	    break;
     }
 
+    OSAddAtomic(-1, &fseh->active);
     return (ret);
 }
 
@@ -1093,11 +1107,18 @@ static int
 fseventsf_close(struct fileglob *fg, struct proc *p)
 {
     fsevent_handle *fseh = (struct fsevent_handle *)fg->fg_data;
+    fs_event_watcher *watcher;
+    
+    OSBitOrAtomic(FSEH_CLOSING, &fseh->flags);
+    while (OSAddAtomic(0, &fseh->active) > 0) {
+	tsleep((caddr_t)fseh->watcher, PRIBIO, "fsevents-close", 1);
+    }
 
-    remove_watcher(fseh->watcher);
-
-    fg->fg_data = NULL;
+    watcher = fseh->watcher;
     fseh->watcher = NULL;
+    fg->fg_data = NULL;
+
+    remove_watcher(watcher);
     FREE(fseh, M_TEMP);
 
     return 0;

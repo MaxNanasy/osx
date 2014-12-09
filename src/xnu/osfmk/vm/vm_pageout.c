@@ -1,31 +1,29 @@
 /*
  * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code 
- * as defined in and that are subject to the Apple Public Source License 
- * Version 2.0 (the 'License'). You may not use this file except in 
- * compliance with the License.  The rights granted to you under the 
- * License may not be used to create, or enable the creation or 
- * redistribution of, unlawful or unlicensed copies of an Apple operating 
- * system, or to circumvent, violate, or enable the circumvention or 
- * violation of, any terms of an Apple operating system software license 
- * agreement.
- *
- * Please obtain a copy of the License at 
- * http://www.opensource.apple.com/apsl/ and read it before using this 
- * file.
- *
- * The Original Code and all software distributed under the License are 
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
- * Please see the License for the specific language governing rights and 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
  * limitations under the License.
- *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 /*
  * @OSF_COPYRIGHT@
@@ -105,9 +103,6 @@
 /*
  * ENCRYPTED SWAP:
  */
-#ifdef __ppc__
-#include <ppc/mappings.h>
-#endif /* __ppc__ */
 #include <../bsd/crypto/aes/aes.h>
 
 extern ipc_port_t	memory_manager_default;
@@ -2192,6 +2187,7 @@ vm_pageout(void)
 
 	thread_deallocate(thread);
 
+	vm_object_reaper_init();
 
 	vm_pageout_continue();
 	/*NOTREACHED*/
@@ -5335,16 +5331,12 @@ vm_paging_map_object(
 	vm_map_offset_t		page_map_offset;
 	vm_map_size_t		map_size;
 	vm_object_offset_t	object_offset;
-#ifdef __ppc__
 	int			i;
 	vm_map_entry_t		map_entry;
-#endif /* __ppc__ */
 
 
-#ifdef __ppc__
 	if (page != VM_PAGE_NULL && *size == PAGE_SIZE) {
 		/*
-		 * Optimization for the PowerPC.
 		 * Use one of the pre-allocated kernel virtual addresses
 		 * and just enter the VM page in the kernel address space
 		 * at that virtual address.
@@ -5415,14 +5407,17 @@ vm_paging_map_object(
 			}
 			vm_paging_page_inuse[i] = TRUE;
 			simple_unlock(&vm_paging_lock);
-			pmap_map_block(kernel_pmap,
-				       page_map_offset,
-				       page->phys_page,
-				       1,						/* Size is number of 4k pages */
-				       VM_PROT_DEFAULT,
-				       ((int) page->object->wimg_bits &
-					VM_WIMG_MASK),
-				       0);
+			if (page->no_isync == TRUE) {
+				pmap_sync_page_data_phys(page->phys_page);
+			}
+			assert(pmap_verify_free(page->phys_page));
+			PMAP_ENTER(kernel_pmap,
+				   page_map_offset,
+				   page,
+				   VM_PROT_DEFAULT,
+				   ((int) page->object->wimg_bits &
+				    VM_WIMG_MASK),
+				   TRUE);
 			vm_paging_objects_mapped++;
 			vm_paging_pages_mapped++; 
 			*address = page_map_offset;
@@ -5441,7 +5436,6 @@ vm_paging_map_object(
 		simple_unlock(&vm_paging_lock);
 		vm_object_lock(object);
 	}
-#endif /* __ppc__ */
 
 	object_offset = vm_object_trunc_page(offset);
 	map_size = vm_map_round_page(*size);
@@ -5499,12 +5493,13 @@ vm_paging_map_object(
 		}
 		cache_attr = ((unsigned int) object->wimg_bits) & VM_WIMG_MASK;
 
+		assert(pmap_verify_free(page->phys_page));
 		PMAP_ENTER(kernel_pmap,
 			   *address + page_map_offset,
 			   page,
 			   VM_PROT_DEFAULT,
 			   cache_attr,
-			   FALSE);
+			   TRUE);
 	}
 			   
 	vm_paging_objects_mapped_slow++;
@@ -5529,14 +5524,12 @@ vm_paging_unmap_object(
 	vm_map_offset_t	end)
 {
 	kern_return_t	kr;
-#ifdef __ppc__
 	int		i;
-#endif /* __ppc__ */
 
-	if ((vm_paging_base_address == 0) &&
-	    ((start < vm_paging_base_address) ||
-	     (end > (vm_paging_base_address
-		     + (VM_PAGING_NUM_PAGES * PAGE_SIZE))))) {
+	if ((vm_paging_base_address == 0) ||
+	    (start < vm_paging_base_address) ||
+	    (end > (vm_paging_base_address
+		    + (VM_PAGING_NUM_PAGES * PAGE_SIZE)))) {
 		/*
 		 * We didn't use our pre-allocated pool of
 		 * kernel virtual address.  Deallocate the
@@ -5556,17 +5549,15 @@ vm_paging_unmap_object(
 		 * pre-allocated pool.  Put it back in the pool
 		 * for next time.
 		 */
-#ifdef __ppc__
 		assert(end - start == PAGE_SIZE);
 		i = (start - vm_paging_base_address) >> PAGE_SHIFT;
 
 		/* undo the pmap mapping */
-		mapping_remove(kernel_pmap, start);
+		pmap_remove(kernel_pmap, start, end);
 
 		simple_lock(&vm_paging_lock);
 		vm_paging_page_inuse[i] = FALSE;
 		simple_unlock(&vm_paging_lock);
-#endif /* __ppc__ */
 	}
 }
 

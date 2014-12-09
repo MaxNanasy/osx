@@ -1,31 +1,29 @@
 /*
- * Copyright (c) 1998-2005 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 1998-2006 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code 
- * as defined in and that are subject to the Apple Public Source License 
- * Version 2.0 (the 'License'). You may not use this file except in 
- * compliance with the License.  The rights granted to you under the 
- * License may not be used to create, or enable the creation or 
- * redistribution of, unlawful or unlicensed copies of an Apple operating 
- * system, or to circumvent, violate, or enable the circumvention or 
- * violation of, any terms of an Apple operating system software license 
- * agreement.
- *
- * Please obtain a copy of the License at 
- * http://www.opensource.apple.com/apsl/ and read it before using this 
- * file.
- *
- * The Original Code and all software distributed under the License are 
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
- * Please see the License for the specific language governing rights and 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
  * limitations under the License.
- *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 #include <IOKit/IOWorkLoop.h>
 #include <IOKit/IOCommandGate.h>
@@ -415,6 +413,8 @@ IOReturn IOPMrootDomain::setProperties ( OSObject *props_obj)
 
     const OSSymbol *boot_complete_string = 
                 OSSymbol::withCString("System Boot Complete");
+    const OSSymbol *sys_shutdown_string = 
+                OSSymbol::withCString("System Shutdown");
     const OSSymbol *stall_halt_string = 
                 OSSymbol::withCString("StallSystemAtHalt");
     const OSSymbol *hibernatemode_string = 
@@ -445,6 +445,33 @@ IOReturn IOPMrootDomain::setProperties ( OSObject *props_obj)
         {
             this->receivePowerNotification(kLocalEvalClamshellCommand);
         }
+    }
+    
+    if( sys_shutdown_string 
+        && (b = OSDynamicCast(OSBoolean, dict->getObject(sys_shutdown_string)))) 
+    {
+    
+        if(kOSBooleanTrue == b)
+        {
+            /* We set systemShutdown = true during shutdown
+               to prevent sleep at unexpected times while loginwindow is trying
+               to shutdown apps and while the OS is trying to transition to
+               complete power of.
+               
+               Set to true during shutdown, as soon as loginwindow shows
+               the "shutdown countdown dialog", through individual app
+               termination, and through black screen kernel shutdown.
+             */
+             kprintf("systemShutdown true\n");
+            systemShutdown = true;
+        } else {
+            /*
+             A shutdown was initiated, but then the shutdown
+             was cancelled, clearing systemShutdown to false here.
+            */
+            kprintf("systemShutdown false\n");
+            systemShutdown = false;            
+        }        
     }
     
     if( stall_halt_string
@@ -654,16 +681,20 @@ IOReturn IOPMrootDomain::setAggressiveness ( unsigned long type, unsigned long n
 // **********************************************************************************
 IOReturn IOPMrootDomain::sleepSystem ( void )
 {
-    if ( !systemBooting && allowSleep && sleepIsSupported ) {
+    if(systemShutdown) {
+        kprintf("Preventing system sleep on grounds of systemShutdown.\n");
+    }
+
+    if ( !systemBooting && !systemShutdown && allowSleep && sleepIsSupported ) {
         patriarch->sleepSystem();
 
         return kIOReturnSuccess;
     }
-    if ( !systemBooting && allowSleep && !sleepIsSupported ) {
+    if ( !systemBooting && !systemShutdown && allowSleep && !sleepIsSupported ) {
         patriarch->dozeSystem();
         return kIOReturnSuccess;
     }
-    return kIOReturnSuccess;
+    return kIOReturnError;
 }
 
 
@@ -1782,7 +1813,13 @@ IOReturn IOPMrootDomain::changePowerStateToPriv ( unsigned long ordinal )
 {
     IOReturn    ret;
 
-    if( SLEEP_STATE == ordinal && sleepSupportedPEFunction )
+    if( (systemBooting || systemShutdown) && (ordinal == SLEEP_STATE) )
+    {
+        kprintf("DANGER DANGER DANGER unexpected code path. aborting SLEEPSTATE change.\n");
+        super::changePowerStateToPriv(ON_STATE);
+    }
+
+    if( (SLEEP_STATE == ordinal) && sleepSupportedPEFunction )
     {
 
         // Determine if the machine supports sleep, or must doze.
@@ -2026,9 +2063,15 @@ bool IOPMrootDomain::batteryPublished(
 
 void IOPMrootDomain::adjustPowerState( void )
 {
-    if ( (sleepSlider == 0) ||
-        ! allowSleep ||
-        systemBooting ) {
+    if ( (sleepSlider == 0) 
+        || !allowSleep 
+        || systemBooting 
+        || systemShutdown )
+    {
+        if(systemBooting || systemShutdown) {
+            kprintf("adjusting power state to ON_STATE [2063] on grounds of systemBooting.\n");
+        }
+        
         changePowerStateToPriv(ON_STATE);
     } else {
         if ( sleepASAP ) 
@@ -2238,7 +2281,7 @@ IOReturn IORootParent::changePowerStateToPriv ( unsigned long ordinal )
 {
     IOReturn        ret;
 
-    if( SLEEP_STATE == ordinal && sleepSupportedPEFunction )
+    if( (SLEEP_STATE == ordinal) && sleepSupportedPEFunction )
     {
 
         // Determine if the machine supports sleep, or must doze.

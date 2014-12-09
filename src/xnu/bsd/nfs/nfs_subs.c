@@ -1,31 +1,29 @@
 /*
  * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code 
- * as defined in and that are subject to the Apple Public Source License 
- * Version 2.0 (the 'License'). You may not use this file except in 
- * compliance with the License.  The rights granted to you under the 
- * License may not be used to create, or enable the creation or 
- * redistribution of, unlawful or unlicensed copies of an Apple operating 
- * system, or to circumvent, violate, or enable the circumvention or 
- * violation of, any terms of an Apple operating system software license 
- * agreement.
- *
- * Please obtain a copy of the License at 
- * http://www.opensource.apple.com/apsl/ and read it before using this 
- * file.
- *
- * The Original Code and all software distributed under the License are 
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
- * Please see the License for the specific language governing rights and 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
  * limitations under the License.
- *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 /* Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved */
 /*
@@ -2160,7 +2158,7 @@ nfsrv_hang_addrlist(struct nfs_export *nx, struct user_nfs_export_args *unxa)
 			if (!cred)
 				return (ENOMEM);
 		} else {
-			cred = NULL;
+			cred = NOCRED;
 		}
 
 		if (nxna.nxna_addr.ss_len == 0) {
@@ -2204,7 +2202,8 @@ nfsrv_hang_addrlist(struct nfs_export *nx, struct user_nfs_export_args *unxa)
 					break;
 				}
 			if ((rnh = nx->nx_rtable[i]) == 0) {
-				kauth_cred_rele(cred);
+			        if (IS_VALID_CRED(cred))
+				        kauth_cred_unref(&cred);
 				_FREE(no, M_NETADDR);
 				return (ENOBUFS);
 			}
@@ -2231,7 +2230,8 @@ nfsrv_hang_addrlist(struct nfs_export *nx, struct user_nfs_export_args *unxa)
 						matched = 1;
 				}
 			}
-			kauth_cred_rele(cred);
+			if (IS_VALID_CRED(cred))
+			        kauth_cred_unref(&cred);
 			_FREE(no, M_NETADDR);
 			if (matched)
 				continue;
@@ -2262,8 +2262,8 @@ nfsrv_free_netopt(struct radix_node *rn, void *w)
 	struct nfs_netopt *nno = (struct nfs_netopt *)rn;
 
 	(*rnh->rnh_deladdr)(rn->rn_key, rn->rn_mask, rnh);
-	if (nno->no_opt.nxo_cred)
-		kauth_cred_rele(nno->no_opt.nxo_cred);
+	if (IS_VALID_CRED(nno->no_opt.nxo_cred))
+		kauth_cred_unref(&nno->no_opt.nxo_cred);
 	_FREE((caddr_t)rn, M_NETADDR);
 	*cnt -= 1;
 	return (0);
@@ -2318,9 +2318,8 @@ nfsrv_export(struct user_nfs_export_args *unxa, struct vfs_context *ctx)
 				/* delete all netopts for this export */
 				nfsrv_free_addrlist(nx);
 				nx->nx_flags &= ~NX_DEFAULTEXPORT;
-				if (nx->nx_defopt.nxo_cred) {
-					kauth_cred_rele(nx->nx_defopt.nxo_cred);
-					nx->nx_defopt.nxo_cred = NULL;
+				if (IS_VALID_CRED(nx->nx_defopt.nxo_cred)) {
+					kauth_cred_unref(&nx->nx_defopt.nxo_cred);
 				}
 				FREE(nx->nx_path, M_TEMP);
 				FREE(nx, M_TEMP);
@@ -2574,9 +2573,8 @@ nfsrv_export(struct user_nfs_export_args *unxa, struct vfs_context *ctx)
 				/* delete all netopts for this export */
 				nfsrv_free_addrlist(nx);
 				nx->nx_flags &= ~NX_DEFAULTEXPORT;
-				if (nx->nx_defopt.nxo_cred) {
-					kauth_cred_rele(nx->nx_defopt.nxo_cred);
-					nx->nx_defopt.nxo_cred = NULL;
+				if (IS_VALID_CRED(nx->nx_defopt.nxo_cred)) {
+					kauth_cred_unref(&nx->nx_defopt.nxo_cred);
 				}
 				FREE(nx->nx_path, M_TEMP);
 				FREE(nx, M_TEMP);
@@ -2586,9 +2584,8 @@ nfsrv_export(struct user_nfs_export_args *unxa, struct vfs_context *ctx)
 			/* delete all netopts for this export */
 			nfsrv_free_addrlist(nx);
 			nx->nx_flags &= ~NX_DEFAULTEXPORT;
-			if (nx->nx_defopt.nxo_cred) {
-				kauth_cred_rele(nx->nx_defopt.nxo_cred);
-				nx->nx_defopt.nxo_cred = NULL;
+			if (IS_VALID_CRED(nx->nx_defopt.nxo_cred)) {
+				kauth_cred_unref(&nx->nx_defopt.nxo_cred);
 			}
 		}
 	}
@@ -2748,9 +2745,9 @@ nfsrv_credcheck(
 	if (nxo && nxo->nxo_cred) {
 		if ((nxo->nxo_flags & NX_MAPALL) ||
 		    ((nxo->nxo_flags & NX_MAPROOT) && !suser(nfsd->nd_cr, NULL))) {
-			kauth_cred_rele(nfsd->nd_cr);
+			kauth_cred_ref(nxo->nxo_cred);
+			kauth_cred_unref(&nfsd->nd_cr);
 			nfsd->nd_cr = nxo->nxo_cred;
-			kauth_cred_ref(nfsd->nd_cr);
 		}
 	}
 	return (0);
@@ -2968,46 +2965,6 @@ nfs_invaldir(vp)
 	np->n_cookieverf.nfsuquad[1] = 0;
 	if (np->n_cookies.lh_first)
 		np->n_cookies.lh_first->ndm_eocookie = 0;
-}
-
-/*
- * The write verifier has changed (probably due to a server reboot), so all
- * NB_NEEDCOMMIT blocks will have to be written again. Since they are on the
- * dirty block list as NB_DELWRI, all this takes is clearing the NB_NEEDCOMMIT
- * flag. Once done the new write verifier can be set for the mount point.
- */
-static int
-nfs_clearcommit_callout(vnode_t vp, __unused void *arg)
-{
-	struct nfsnode *np = VTONFS(vp);
-	struct nfsbuflists blist;
-	struct nfsbuf *bp;
-
-	lck_mtx_lock(nfs_buf_mutex);
-	if (nfs_buf_iterprepare(np, &blist, NBI_DIRTY)) {
-		lck_mtx_unlock(nfs_buf_mutex);
-		return (VNODE_RETURNED);
-	}
-	LIST_FOREACH(bp, &blist, nb_vnbufs) {
-		if (nfs_buf_acquire(bp, NBAC_NOWAIT, 0, 0))
-			continue;
-		if ((bp->nb_flags & (NB_DELWRI | NB_NEEDCOMMIT))
-			== (NB_DELWRI | NB_NEEDCOMMIT)) {
-			bp->nb_flags &= ~NB_NEEDCOMMIT;
-			np->n_needcommitcnt--;
-		}
-		nfs_buf_drop(bp);
-	}
-	CHECK_NEEDCOMMITCNT(np);
-	nfs_buf_itercomplete(np, &blist, NBI_DIRTY);
-	lck_mtx_unlock(nfs_buf_mutex);
-	return (VNODE_RETURNED);
-}
-
-void
-nfs_clearcommit(mount_t mp)
-{
-	vnode_iterate(mp, VNODE_NOLOCK_INTERNAL, nfs_clearcommit_callout, NULL);
 }
 
 #ifndef NFS_NOSERVER

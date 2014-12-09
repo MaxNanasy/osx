@@ -1,31 +1,29 @@
 /*
  * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code 
- * as defined in and that are subject to the Apple Public Source License 
- * Version 2.0 (the 'License'). You may not use this file except in 
- * compliance with the License.  The rights granted to you under the 
- * License may not be used to create, or enable the creation or 
- * redistribution of, unlawful or unlicensed copies of an Apple operating 
- * system, or to circumvent, violate, or enable the circumvention or 
- * violation of, any terms of an Apple operating system software license 
- * agreement.
- *
- * Please obtain a copy of the License at 
- * http://www.opensource.apple.com/apsl/ and read it before using this 
- * file.
- *
- * The Original Code and all software distributed under the License are 
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
- * Please see the License for the specific language governing rights and 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
  * limitations under the License.
- *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 /*
  * @OSF_COPYRIGHT@
@@ -71,7 +69,7 @@
 #include <i386/trap.h>
 #include <i386/pmap.h>
 #include <i386/fpu.h>
-#include <architecture/i386/pio.h> /* inb() */
+#include <i386/misc_protos.h> /* panic_io_port_read() */
 
 #include <mach/exception.h>
 #include <mach/kern_return.h>
@@ -288,8 +286,6 @@ extern struct recovery	recover_table_end[];
 
 const char *	trap_type[] = {TRAP_NAMES};
 unsigned 	TRAP_TYPES = sizeof(trap_type)/sizeof(trap_type[0]);
-
-extern unsigned panic_io_port;
 
 static inline void
 reset_dr7(void)
@@ -625,8 +621,7 @@ panic_trap(x86_saved_state32_t *regs)
 	uint32_t	cr3 = get_cr3();
 	uint32_t	cr4 = get_cr4();
 
-	if (panic_io_port)
-	  (void)inb(panic_io_port);
+	panic_io_port_read();
 
 	kprintf("panic trap number 0x%x, eip 0x%x\n", regs->trapno, regs->eip);
 	kprintf("cr0 0x%08x cr2 0x%08x cr3 0x%08x cr4 0x%08x\n",
@@ -671,8 +666,7 @@ panic_double_fault(int code)
 /* Issue an I/O port read if one has been requested - this is an event logic
  * analyzers can use as a trigger point.
  */
-	if (panic_io_port)
-		(void)inb(panic_io_port);
+	panic_io_port_read();
 
 	/*
 	 * Break kprintf lock in case of recursion,
@@ -754,14 +748,14 @@ panic_double_fault64(x86_saved_state_t *esp)
 		      "RSP: 0x%016qx, RBP: 0x%016qx, RSI: 0x%016qx, RDI: 0x%016qx\n"
 		      "R8:  0x%016qx, R9:  0x%016qx, R10: 0x%016qx, R11: 0x%016qx\n"
 		      "R12: 0x%016qx, R13: 0x%016qx, R14: 0x%016qx, R15: 0x%016qx\n"
-		      "RFL: 0x%016qx, RIP: 0x%016qx\n",
+		      "RFL: 0x%016qx, RIP: 0x%016qx, CR2: 0x%016qx\n",
 		      cpu_number(), current_thread(), ss64p->isf.trapno, ss64p->isf.err,
 		      get_cr0(), get_cr2(), get_cr3(), get_cr4(),
 		      ss64p->rax, ss64p->rbx, ss64p->rcx, ss64p->rdx,
 		      ss64p->isf.rsp, ss64p->rbp, ss64p->rsi, ss64p->rdi,
 		      ss64p->r8, ss64p->r9, ss64p->r10, ss64p->r11,
 		      ss64p->r12, ss64p->r13, ss64p->r14, ss64p->r15,
-		      ss64p->isf.rflags, ss64p->isf.rip);
+		      ss64p->isf.rflags, ss64p->isf.rip, ss64p->cr2);
 	} else {
 		x86_saved_state32_t	*ss32p = saved_state32(esp);
 		panic("Double fault (CPU:%d, thread:%p, trapno:0x%x, err:0x%x),"

@@ -1,31 +1,29 @@
 /*
  * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code 
- * as defined in and that are subject to the Apple Public Source License 
- * Version 2.0 (the 'License'). You may not use this file except in 
- * compliance with the License.  The rights granted to you under the 
- * License may not be used to create, or enable the creation or 
- * redistribution of, unlawful or unlicensed copies of an Apple operating 
- * system, or to circumvent, violate, or enable the circumvention or 
- * violation of, any terms of an Apple operating system software license 
- * agreement.
- *
- * Please obtain a copy of the License at 
- * http://www.opensource.apple.com/apsl/ and read it before using this 
- * file.
- *
- * The Original Code and all software distributed under the License are 
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
- * Please see the License for the specific language governing rights and 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
  * limitations under the License.
- *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 /*
  * @OSF_COPYRIGHT@
@@ -105,6 +103,7 @@
 
 #include <i386/mp_desc.h>
 #include <i386/mp.h>
+#include <i386/cpuid.h>
 
 #include <IOKit/IOPlatformExpert.h>
 #include <IOKit/IOHibernatePrivate.h>
@@ -120,7 +119,6 @@ void	enable_bluebox(void);
 void	disable_bluebox(void);
 
 static void machine_conf(void);
-#include <i386/cpuid.h>
 
 extern int		default_preemption_rate;
 extern int		max_unsafe_quanta;
@@ -147,7 +145,7 @@ typedef struct _cframe_t {
 
 void panic_i386_backtrace(void *_frame, int nframes);
 
-unsigned panic_io_port = 0;
+static unsigned panic_io_port = 0;
 
 void
 machine_startup()
@@ -671,11 +669,22 @@ halt_all_cpus(boolean_t reboot)
 	while(1);
 }
 
+/* Issue an I/O port read if one has been requested - this is an event logic
+ * analyzers can use as a trigger point.
+ */
+
+void
+panic_io_port_read(void) {
+	if (panic_io_port)
+		(void)inb(panic_io_port);
+}
+
 /* For use with the MP rendezvous mechanism
  */
 
 static void
 machine_halt_cpu(__unused void *arg) {
+	panic_io_port_read();
 	__asm__ volatile("hlt");
 }
 
@@ -709,8 +718,7 @@ Debugger(
 /* Issue an I/O port read if one has been requested - this is an event logic
  * analyzers can use as a trigger point.
  */
-		if (panic_io_port)
-			(void)inb(panic_io_port);
+		panic_io_port_read();
 
 		/* Obtain current frame pointer */
 		__asm__ volatile("movl %%ebp, %0" : "=m" (stackptr));

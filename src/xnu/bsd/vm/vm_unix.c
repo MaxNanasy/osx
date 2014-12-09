@@ -1,31 +1,29 @@
 /*
  * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code 
- * as defined in and that are subject to the Apple Public Source License 
- * Version 2.0 (the 'License'). You may not use this file except in 
- * compliance with the License.  The rights granted to you under the 
- * License may not be used to create, or enable the creation or 
- * redistribution of, unlawful or unlicensed copies of an Apple operating 
- * system, or to circumvent, violate, or enable the circumvention or 
- * violation of, any terms of an Apple operating system software license 
- * agreement.
- *
- * Please obtain a copy of the License at 
- * http://www.opensource.apple.com/apsl/ and read it before using this 
- * file.
- *
- * The Original Code and all software distributed under the License are 
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
- * Please see the License for the specific language governing rights and 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
  * limitations under the License.
- *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 /* 
  * Mach Operating System
@@ -389,7 +387,9 @@ task_for_pid(
 	int is_member = 0;
 	boolean_t funnel_state;
 	boolean_t ispermitted = FALSE;
+#if DIAGNOSTIC
 	char procname[MAXCOMLEN+1];
+#endif /* DIAGNOSTIC */
 
 	AUDIT_MACH_SYSCALL_ENTER(AUE_TASKFORPID);
 	AUDIT_ARG(pid, pid);
@@ -415,21 +415,26 @@ task_for_pid(
 	    (uthread->uu_flag & UT_SETUID) == 0) {
 		kauth_cred_t old = uthread->uu_ucred;
 		proc_lock(p1);
+		kauth_cred_ref(p1->p_ucred);
 		uthread->uu_ucred = p1->p_ucred;
-		kauth_cred_ref(uthread->uu_ucred);
 		proc_unlock(p1);
-		if (old != NOCRED)
-			kauth_cred_rele(old);
+		if (IS_VALID_CRED(old))
+			kauth_cred_unref(&old);
 	}
 
 	p = pfind(pid);
 	AUDIT_ARG(process, p);
 
+	/*
+	 * XXX p_ucred check can be bogus in multithreaded processes,
+	 * XXX unless the funnel is held.
+	 */
 	switch (tfp_policy) {
 
 		case KERN_TFP_POLICY_PERMISSIVE:
 			/* self or suser or related ones */
 			if ((p != (struct proc *) 0)
+				&& (p->p_stat != SZOMB)
 				&& (p1 != (struct proc *) 0)
 				&& (
 					(p1 == p)
@@ -438,7 +443,6 @@ task_for_pid(
 						((p->p_ucred->cr_ruid == kauth_cred_get()->cr_ruid))
 						&& ((p->p_flag & P_SUGID) == 0))
 					)
-				&& (p->p_stat != SZOMB)
 				)
 					ispermitted = TRUE;
 			break;
@@ -447,6 +451,7 @@ task_for_pid(
 			/* self or suser or  setgid and related ones only */
 			if ((p != (struct proc *) 0)
 				&& (p1 != (struct proc *) 0)
+				&& (p->p_stat != SZOMB)
 				&& (
 					(p1 == p)
 					|| !(suser(kauth_cred_get(), 0))
@@ -463,7 +468,6 @@ task_for_pid(
 							&& ((p->p_flag & P_SUGID) == 0))
 					  )
 					)
-				&& (p->p_stat != SZOMB)
 				)
 					ispermitted = TRUE;
 
@@ -496,7 +500,9 @@ task_for_pid(
 	        task_deallocate(t1);
 			error = KERN_SUCCESS;
 			goto tfpout;
-	} else {
+	}
+#if DIAGNOSTIC
+	else {
 		/* 
 		 * There is no guarantee that p_comm is null terminated and
 		 * kernel implementation of string functions are complete. So 
@@ -509,6 +515,7 @@ task_for_pid(
 				((p1 != PROC_NULL)?(p1->p_pid):0), &procname[0],
 				((p != PROC_NULL)?(p->p_pid):0));
 	}
+#endif /* DIAGNOSTIC */
 
     task_deallocate(t1);
 	tret = MACH_PORT_NULL;
@@ -567,16 +574,20 @@ task_name_for_pid(
 	 * Delayed binding of thread credential to process credential, if we
 	 * are not running with an explicitly set thread credential.
 	 */
+	/*
+	 * XXX p_ucred check can be bogus in multithreaded processes,
+	 * XXX unless the funnel is held.
+	 */
 	uthread = get_bsdthread_info(current_thread());
 	if (uthread->uu_ucred != p1->p_ucred &&
 	    (uthread->uu_flag & UT_SETUID) == 0) {
 		kauth_cred_t old = uthread->uu_ucred;
 		proc_lock(p1);
+		kauth_cred_ref(p1->p_ucred);
 		uthread->uu_ucred = p1->p_ucred;
-		kauth_cred_ref(uthread->uu_ucred);
 		proc_unlock(p1);
-		if (old != NOCRED)
-			kauth_cred_rele(old);
+		if (IS_VALID_CRED(old))
+			kauth_cred_unref(&old);
 	}
 
 	p = pfind(pid);
@@ -698,6 +709,16 @@ SYSCTL_PROC(_kern_tfp, KERN_TFP_RW_GROUP, rw_group, CTLTYPE_INT | CTLFLAG_RW,
 SYSCTL_INT(_vm, OID_AUTO, shared_region_trace_level, CTLFLAG_RW, &shared_region_trace_level, 0, "");
 
 /*
+ * Try and cap the number of mappings the user might be trying to deal with,
+ * so that we don't end up allocating insane amounts of wired memory in the
+ * kernel based on bogus user arguments.
+ * There are 2 shared regions (TEXT and DATA). The size of each submap
+ * is SHARED_TEXT_REGION_SIZE and we can have at most 1 VM map entry per page,
+ * so the maximum number of mappings we could ever have to deal with is...
+ */
+#define SHARED_REGION_MAX_MAPPINGS ((2 *SHARED_TEXT_REGION_SIZE) >> PAGE_SHIFT)
+
+/*
  * shared_region_make_private_np:
  *
  * This system call is for "dyld" only.
@@ -742,6 +763,10 @@ shared_region_make_private_np(
 
 	/* allocate kernel space for the "ranges" */
 	if (range_count != 0) {
+		if (range_count > SHARED_REGION_MAX_MAPPINGS) {
+			error = EINVAL;
+			goto done;
+		}
 		if ((mach_vm_size_t) ranges_size !=
 		    (mach_vm_size_t) range_count * sizeof (ranges[0])) {
 			/* 32-bit integer overflow */
@@ -992,6 +1017,10 @@ shared_region_map_file_np(
 	} else if (mapping_count <= SFM_MAX_STACK) {
 		mappings = &stack_mappings[0];
 	} else {
+		if (mapping_count > SHARED_REGION_MAX_MAPPINGS) {
+			error = EINVAL;
+			goto done;
+		}
 		if ((mach_vm_size_t) mappings_size !=
 		    (mach_vm_size_t) mapping_count * sizeof (mappings[0])) {
 			/* 32-bit integer overflow */

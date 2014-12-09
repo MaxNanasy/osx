@@ -1,31 +1,29 @@
 /*
  * Copyright (c) 1998-2000 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code 
- * as defined in and that are subject to the Apple Public Source License 
- * Version 2.0 (the 'License'). You may not use this file except in 
- * compliance with the License.  The rights granted to you under the 
- * License may not be used to create, or enable the creation or 
- * redistribution of, unlawful or unlicensed copies of an Apple operating 
- * system, or to circumvent, violate, or enable the circumvention or 
- * violation of, any terms of an Apple operating system software license 
- * agreement.
- *
- * Please obtain a copy of the License at 
- * http://www.opensource.apple.com/apsl/ and read it before using this 
- * file.
- *
- * The Original Code and all software distributed under the License are 
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
- * Please see the License for the specific language governing rights and 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
  * limitations under the License.
- *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 
 #include <IOKit/assert.h>
@@ -46,7 +44,6 @@
 #include <IOKit/pwr_mgt/IOPowerConnection.h>
 #include <IOKit/pwr_mgt/RootDomain.h>
 
-#include "IOPMWorkArbiter.h"
 
 // Required for notification instrumentation
 #include "IOServicePrivate.h"
@@ -1052,13 +1049,6 @@ IOReturn IOService::acknowledgeSetPowerState ( void )
 //*********************************************************************************
 
 void IOService::driver_acked ( void )
-{
-    getPMRootDomain()->getPMArbiter()->driverAckedOccurred(this);    
-    return;
-}
-
-
-void IOService::driver_acked_threaded ( void )
 {
 
     switch (priv->machine_state) {
@@ -3172,6 +3162,7 @@ void IOService::all_done ( void )
             start_our_change(priv->head_note);
         } else {
             nub = priv->changeList->changeNote[priv->head_note].parent;
+            if (nub) nub->retain(); // might be released by start_parent_change()
             if ( start_parent_change(priv->head_note) == IOPMAckImplied ) 
             {
                 parent = (IOService *)nub->copyParentEntry(gIOPowerPlane);
@@ -3181,6 +3172,7 @@ void IOService::all_done ( void )
                     parent->release();
                 }
             }
+            if (nub) nub->release();
         }
     } else {
         IOLockUnlock(priv->queue_lock);
@@ -3198,14 +3190,9 @@ void IOService::all_done ( void )
 //
 //*********************************************************************************
 
-void IOService::all_acked ( void )
-{
-    getPMRootDomain()->getPMArbiter()->allAckedOccurred(this); 
-    return;
-}
 
 
-void IOService::all_acked_threaded ( void )
+void IOService::all_acked( void )
 {
     switch (priv->machine_state) {
        case kIOPM_OurChangeSetPowerState:

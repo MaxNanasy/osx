@@ -1,31 +1,29 @@
 /*
  * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code 
- * as defined in and that are subject to the Apple Public Source License 
- * Version 2.0 (the 'License'). You may not use this file except in 
- * compliance with the License.  The rights granted to you under the 
- * License may not be used to create, or enable the creation or 
- * redistribution of, unlawful or unlicensed copies of an Apple operating 
- * system, or to circumvent, violate, or enable the circumvention or 
- * violation of, any terms of an Apple operating system software license 
- * agreement.
- *
- * Please obtain a copy of the License at 
- * http://www.opensource.apple.com/apsl/ and read it before using this 
- * file.
- *
- * The Original Code and all software distributed under the License are 
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
- * Please see the License for the specific language governing rights and 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
  * limitations under the License.
- *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 /* Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved */
 /*
@@ -1599,7 +1597,10 @@ nfsrvw_sort(list, num)
 /*
  * copy credentials making sure that the result can be compared with bcmp().
  *
- * XXX ILLEGAL
+ * NOTE:	This function is only intended to operate on a real input
+ *		credential and a template output credential; the template
+ *		ouptut credential is intended to then be used as an argument
+ *		to kauth_cred_create() - AND NEVER REFERENCED OTHERWISE.
  */
 void
 nfsrv_setcred(kauth_cred_t incred, kauth_cred_t outcred)
@@ -1607,7 +1608,6 @@ nfsrv_setcred(kauth_cred_t incred, kauth_cred_t outcred)
 	int i;
 
 	bzero((caddr_t)outcred, sizeof (*outcred));
-	outcred->cr_ref = 1;
 	outcred->cr_uid = kauth_cred_getuid(incred);
 	outcred->cr_ngroups = incred->cr_ngroups;
 	for (i = 0; i < incred->cr_ngroups; i++)
@@ -1975,8 +1975,6 @@ nfsrv_mknod(nfsd, slp, procp, mrq)
 
 	context.vc_proc = procp;
 	context.vc_ucred = nfsd->nd_cr;
-	hacked_context.vc_proc = procp;
-	hacked_context.vc_ucred = proc_ucred(procp);
 
 	/*
 	 * Save the original credential UID in case they are
@@ -2097,6 +2095,9 @@ nfsrv_mknod(nfsd, slp, procp, mrq)
 			vnode_put(vp);
 			vp = NULL;
 		}
+		hacked_context.vc_proc = procp;
+		hacked_context.vc_ucred = kauth_cred_proc_ref(procp);
+
 		nd.ni_cnd.cn_nameiop = LOOKUP;
 		nd.ni_cnd.cn_flags &= ~LOCKPARENT;
 		nd.ni_cnd.cn_context = &hacked_context;
@@ -2108,6 +2109,7 @@ nfsrv_mknod(nfsd, slp, procp, mrq)
 			if (nd.ni_cnd.cn_flags & ISSYMLINK)
 			        error = EINVAL;
 		}
+		kauth_cred_unref(&hacked_context.vc_ucred);
 	}
 out1:
 	if (xacl != NULL)
@@ -2355,9 +2357,12 @@ retry:
 
 	/* reset credential if it was remapped */
 	if (nfsd->nd_cr != saved_cred) {
-		kauth_cred_rele(nfsd->nd_cr);
+		kauth_cred_unref(&nfsd->nd_cr);
+		/*
+		 * consume reference taken above
+		 */
 		nfsd->nd_cr = saved_cred;
-		kauth_cred_ref(nfsd->nd_cr);
+		saved_cred = NULL;
 	}
 
 	tond.ni_cnd.cn_nameiop = RENAME;
@@ -2721,7 +2726,7 @@ out:
 	if (topath)
 		FREE_ZONE(topath, MAXPATHLEN, M_NAMEI);
 	if (saved_cred)
-		kauth_cred_rele(saved_cred);
+		kauth_cred_unref(&saved_cred);
 	return (0);
 
 nfsmout:
@@ -2760,7 +2765,7 @@ nfsmout:
 	if (topath)
 		FREE_ZONE(topath, MAXPATHLEN, M_NAMEI);
 	if (saved_cred)
-		kauth_cred_rele(saved_cred);
+		kauth_cred_unref(&saved_cred);
 	return (error);
 }
 

@@ -1,31 +1,29 @@
 /*
  * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code 
- * as defined in and that are subject to the Apple Public Source License 
- * Version 2.0 (the 'License'). You may not use this file except in 
- * compliance with the License.  The rights granted to you under the 
- * License may not be used to create, or enable the creation or 
- * redistribution of, unlawful or unlicensed copies of an Apple operating 
- * system, or to circumvent, violate, or enable the circumvention or 
- * violation of, any terms of an Apple operating system software license 
- * agreement.
- *
- * Please obtain a copy of the License at 
- * http://www.opensource.apple.com/apsl/ and read it before using this 
- * file.
- *
- * The Original Code and all software distributed under the License are 
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
- * Please see the License for the specific language governing rights and 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
  * limitations under the License.
- *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 /* Copyright (c) 1995, 1997 Apple Computer, Inc. All Rights Reserved */
 /*
@@ -666,9 +664,14 @@ uthread_alloc(task_t task, thread_t thr_act )
 	uth_parent = (struct uthread *)get_bsdthread_info(current_thread());
 	if ((task == current_task()) && 
 	    (uth_parent != NULL) &&
-	    (uth_parent->uu_ucred != NOCRED)) {
+	    (IS_VALID_CRED(uth_parent->uu_ucred))) {
+		/*
+		 * XXX The new thread is, in theory, being created in context
+		 * XXX of parent thread, so a direct reference to the parent
+		 * XXX is OK.
+		 */
+		kauth_cred_ref(uth_parent->uu_ucred);
 		uth->uu_ucred = uth_parent->uu_ucred;
-		kauth_cred_ref(uth->uu_ucred);
 		/* the credential we just inherited is an assumed credential */
 		if (uth_parent->uu_flag & UT_SETUID)
 			uth->uu_flag |= UT_SETUID;
@@ -729,8 +732,11 @@ uthread_free(task_t task, void *uthread, void * bsd_info)
 		sel->wql = 0;
 	}
 
-	if (uth->uu_ucred != NOCRED)
-		kauth_cred_rele(uth->uu_ucred);
+	if (IS_VALID_CRED(uth->uu_ucred)) {
+		kauth_cred_t oldcred = uth->uu_ucred;
+		uth->uu_ucred = NOCRED;
+		kauth_cred_unref(&oldcred);
+	}
 
 	if ((task != kernel_task) && p) {
 		funnel_state = thread_funnel_set(kernel_flock, TRUE);

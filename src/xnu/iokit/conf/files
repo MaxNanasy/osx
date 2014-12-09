@@ -21,6 +21,7 @@ iokit/Kernel/IOStartIOKit.cpp				optional iokitcpp
 
 iokit/Kernel/IODeviceTreeSupport.cpp			optional iokitcpp
 
+iokit/Kernel/IOPMWorkArbiter.cpp                        optional iokitcpp
 iokit/Kernel/IORegistryEntry.cpp			optional iokitcpp
 iokit/Kernel/IOService.cpp				optional iokitcpp
 iokit/Kernel/IOServicePM.cpp				optional iokitcpp
@@ -28,7 +29,6 @@ iokit/Kernel/IOPMchangeNoteList.cpp			optional iokitcpp
 iokit/Kernel/IOPMinformee.cpp				optional iokitcpp
 iokit/Kernel/IOPMinformeeList.cpp			optional iokitcpp
 iokit/Kernel/IOPMPowerStateQueue.cpp			optional iokitcpp
-iokit/Kernel/IOPMWorkArbiter.cpp			optional iokitcpp
 iokit/Kernel/IOCatalogue.cpp				optional iokitcpp
 iokit/Kernel/IOPMPowerSource.cpp                        optional iokitcpp
 iokit/Kernel/IOPMPowerSourceList.cpp                    optional iokitcpp

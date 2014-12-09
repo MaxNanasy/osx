@@ -1,31 +1,29 @@
 /*
  * Copyright (c) 2000-2003 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code 
- * as defined in and that are subject to the Apple Public Source License 
- * Version 2.0 (the 'License'). You may not use this file except in 
- * compliance with the License.  The rights granted to you under the 
- * License may not be used to create, or enable the creation or 
- * redistribution of, unlawful or unlicensed copies of an Apple operating 
- * system, or to circumvent, violate, or enable the circumvention or 
- * violation of, any terms of an Apple operating system software license 
- * agreement.
- *
- * Please obtain a copy of the License at 
- * http://www.opensource.apple.com/apsl/ and read it before using this 
- * file.
- *
- * The Original Code and all software distributed under the License are 
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
- * Please see the License for the specific language governing rights and 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
  * limitations under the License.
- *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 /* Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved */
 /*
@@ -482,19 +480,17 @@ void vnode_set_hard_link(vnode_t vp)
 
 void vnode_uncache_credentials(vnode_t vp)
 {
-        kauth_cred_t ucred = NULL;
+        kauth_cred_t ucred = NOCRED;
 
-        if (vp->v_cred) {
-	        vnode_lock(vp);
-
+	vnode_lock(vp);
+        if (IS_VALID_CRED(vp->v_cred)) {
 		ucred = vp->v_cred;
-		vp->v_cred = NULL;
-
-		vnode_unlock(vp);
-
-		if (ucred)
-		        kauth_cred_rele(ucred);
+		vp->v_cred = NOCRED;
 	}
+	vnode_unlock(vp);
+
+	if (ucred != NOCRED)
+		kauth_cred_unref(&ucred);
 }
 
 
@@ -506,8 +502,8 @@ void vnode_cache_credentials(vnode_t vp, vfs_context_t context)
 
 	ucred = vfs_context_ucred(context);
 
-	if (vp->v_cred != ucred || (vp->v_mount->mnt_kern_flag & MNTK_AUTH_OPAQUE)) {
-		vnode_lock(vp);
+	vnode_lock(vp);
+	if (IS_VALID_CRED(ucred) && (vp->v_cred != ucred || (vp->v_mount->mnt_kern_flag & MNTK_AUTH_OPAQUE))) {
 
 		microuptime(&tv);
 		vp->v_cred_timestamp = tv.tv_sec;
@@ -518,11 +514,11 @@ void vnode_cache_credentials(vnode_t vp, vfs_context_t context)
 			tcred = vp->v_cred;
 			vp->v_cred = ucred;
 		}
-		vnode_unlock(vp);
-	
-		if (tcred)
-			kauth_cred_rele(tcred);
 	}
+	vnode_unlock(vp);
+
+	if (IS_VALID_CRED(tcred))
+		kauth_cred_unref(&tcred);
 }
 
 /*	reverse_lookup - lookup by walking back up the parent chain while leveraging
@@ -555,6 +551,7 @@ reverse_lookup(vnode_t start_vp, vnode_t *lookup_vpp, struct filedesc *fdp, vfs_
 
 		if (auth_opaque && ((tv.tv_sec - dp->v_cred_timestamp) > VCRED_EXPIRED))
 			break;
+		/* XXX should be safe without vnode_lock() */
 		if (dp->v_cred != ucred)
 			break;
 		/*
@@ -670,6 +667,7 @@ cache_lookup_path(struct nameidata *ndp, struct componentname *cnp, vnode_t dp, 
 		if (auth_opaque && ((tv.tv_sec - dp->v_cred_timestamp) > VCRED_EXPIRED))
 		        break;
 
+		/* XXX should be safe without vnode_lock() */
 		if (dp->v_cred != ucred)
 		        break;
 		/*

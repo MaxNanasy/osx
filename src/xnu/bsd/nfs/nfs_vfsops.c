@@ -1,31 +1,29 @@
 /*
  * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code 
- * as defined in and that are subject to the Apple Public Source License 
- * Version 2.0 (the 'License'). You may not use this file except in 
- * compliance with the License.  The rights granted to you under the 
- * License may not be used to create, or enable the creation or 
- * redistribution of, unlawful or unlicensed copies of an Apple operating 
- * system, or to circumvent, violate, or enable the circumvention or 
- * violation of, any terms of an Apple operating system software license 
- * agreement.
- *
- * Please obtain a copy of the License at 
- * http://www.opensource.apple.com/apsl/ and read it before using this 
- * file.
- *
- * The Original Code and all software distributed under the License are 
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
- * Please see the License for the specific language governing rights and 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
  * limitations under the License.
- *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 /* Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved */
 /*
@@ -229,7 +227,7 @@ nfs_statfs(mount_t mp, struct vfsstatfs *sbp, vfs_context_t context)
 		nfs_fsinfo(nmp, vp, cred, p);
 	nfsm_reqhead(NFSX_FH(v3));
 	if (error) {
-		kauth_cred_rele(cred);
+		kauth_cred_unref(&cred);
 		vnode_put(vp);
 		return (error);
 	}
@@ -286,7 +284,7 @@ nfs_statfs(mount_t mp, struct vfsstatfs *sbp, vfs_context_t context)
 		sbp->f_ffree = 0;
 	}
 	nfsm_reqdone;
- 	kauth_cred_rele(cred);
+ 	kauth_cred_unref(&cred);
 	vnode_put(vp);
 	return (error);
 }
@@ -1036,6 +1034,9 @@ mountnfs(
 	struct vfs_context context; /* XXX get from caller? */
 	u_int64_t xid;
 
+	/* up front because of reference */
+	context.vc_ucred = kauth_cred_proc_ref(p);
+
 	/*
 	 * Silently clear NFSMNT_NOCONN if it's a TCP mount, it makes
 	 * no sense in that context.
@@ -1047,12 +1048,14 @@ mountnfs(
 		nmp = VFSTONFS(mp);
 		/* update paths, file handles, etc, here	XXX */
 		mbuf_freem(nam);
+		kauth_cred_unref(&context.vc_ucred);
 		return (0);
 	} else {
 		MALLOC_ZONE(nmp, struct nfsmount *,
 				sizeof (struct nfsmount), M_NFSMNT, M_WAITOK);
 		if (!nmp) {
 			mbuf_freem(nam);
+			kauth_cred_unref(&context.vc_ucred);
 			return (ENOMEM);
 		}
 		bzero((caddr_t)nmp, sizeof (struct nfsmount));
@@ -1189,7 +1192,7 @@ mountnfs(
 	 */
 	// LP64todo - fix CAST_DOWN of argp->fh
 	error = nfs_getattr_no_vnode(mp, CAST_DOWN(caddr_t, argp->fh), argp->fhsize,
-			proc_ucred(p), p, &nvattrs, &xid);
+			context.vc_ucred, p, &nvattrs, &xid);
 	if (error) {
 		/*
 		 * we got problems... we couldn't get the attributes
@@ -1231,7 +1234,7 @@ mountnfs(
 	 * the server about what its preferred I/O sizes are.
 	 */
 	if (nmp->nm_flag & NFSMNT_NFSV3)
-		nfs_fsinfo(nmp, *vpp, proc_ucred(p), p);
+		nfs_fsinfo(nmp, *vpp, context.vc_ucred, p);
 	nmp->nm_biosize = nfs_biosize(nmp);
 	vfs_statfs(mp)->f_iosize = NFS_IOSIZE;
 
@@ -1249,17 +1252,18 @@ mountnfs(
 	 * Do statfs to ensure static info gets set to reasonable values.
 	 */
 	context.vc_proc = p;
-	context.vc_ucred = proc_ucred(p);
 	nfs_statfs(mp, vfs_statfs(mp), &context);
 
 	if (nmp->nm_flag & NFSMNT_RESVPORT)
 		nfs_resv_mounts++;
 	nmp->nm_state |= NFSSTA_MOUNTED;
+	kauth_cred_unref(&context.vc_ucred);
 	return (0);
 bad:
 	nfs_disconnect(nmp);
 	FREE_ZONE((caddr_t)nmp, sizeof (struct nfsmount), M_NFSMNT);
 	mbuf_freem(nam);
+	kauth_cred_unref(&context.vc_ucred);
 	return (error);
 }
 

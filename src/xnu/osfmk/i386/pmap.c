@@ -1,31 +1,29 @@
 /*
  * Copyright (c) 2000-2006 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code 
- * as defined in and that are subject to the Apple Public Source License 
- * Version 2.0 (the 'License'). You may not use this file except in 
- * compliance with the License.  The rights granted to you under the 
- * License may not be used to create, or enable the creation or 
- * redistribution of, unlawful or unlicensed copies of an Apple operating 
- * system, or to circumvent, violate, or enable the circumvention or 
- * violation of, any terms of an Apple operating system software license 
- * agreement.
- *
- * Please obtain a copy of the License at 
- * http://www.opensource.apple.com/apsl/ and read it before using this 
- * file.
- *
- * The Original Code and all software distributed under the License are 
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
- * Please see the License for the specific language governing rights and 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
  * limitations under the License.
- *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 /*
  * @OSF_COPYRIGHT@
@@ -1084,7 +1082,7 @@ pmap_bootstrap(
 	  ml_set_interrupts_enabled(istate);
 
 	}
-	kernel_pmap->pm_hold = kernel_pmap->pm_pml4;
+	kernel_pmap->pm_hold = (vm_offset_t)kernel_pmap->pm_pml4;
 
 	kprintf("Kernel virtual space from 0x%x to 0x%x.\n",
 			VADDR(KPTDI,0), virtual_end);
@@ -1275,7 +1273,6 @@ pmap_create(
 	vm_size_t	size;
 	pdpt_entry_t    *pdpt;
 	pml4_entry_t    *pml4p;
-	vm_page_t       m;
 	int template;
 	pd_entry_t      *pdp;
 	spl_t s;
@@ -1302,6 +1299,7 @@ pmap_create(
 	p->nx_enabled = 1;
 	p->pm_64bit = is_64bit;
 	p->pm_kernel_cr3 = FALSE;
+	p->pm_shared = FALSE;
 
 	if (!cpu_64bit) {
 	  /* legacy 32 bit setup */
@@ -1436,7 +1434,6 @@ pmap_clear_4GB_pagezero(pmap_t p)
 {
 	int		spl;
 	pdpt_entry_t	*user_pdptp;
-	uint32_t	cr3;
 
 	if (!p->pm_kernel_cr3)
 		return;
@@ -2201,6 +2198,7 @@ pmap_enter(
 		    if (pv_h->pmap == PMAP_NULL) {
 			panic("pmap_enter: null pv_list!");
 		    }
+
 		    if (pv_h->va == vaddr && pv_h->pmap == pmap) {
 			/*
 			 * Header is the pv_entry.  Copy the next one
@@ -3803,6 +3801,8 @@ kern_return_t pmap_nest(pmap_t grand, pmap_t subord, addr64_t vstart, addr64_t n
 	}
 	if ((size >> 28) != 1) panic("pmap_nest: size 0x%llx must be 0x%x", size, NBPDE);
 
+	subord->pm_shared = TRUE;
+
 	// prepopulate subord pmap pde's if necessary
 
 	if (cpu_64bit) {
@@ -4005,7 +4005,8 @@ pmap_flush_tlbs(pmap_t	pmap)
 		if (!cpu_datap(cpu)->cpu_running)
 			continue;
 		if ((cpu_datap(cpu)->cpu_task_cr3   == pmap_cr3) ||
-		    (cpu_datap(cpu)->cpu_active_cr3 == pmap_cr3) ||
+		    (CPU_GET_ACTIVE_CR3(cpu) == pmap_cr3) ||
+		    (pmap->pm_shared) ||
 		    ((pmap == kernel_pmap) &&
 		     (!CPU_CR3_IS_ACTIVE(cpu) ||
 		      cpu_datap(cpu)->cpu_task_map == TASK_MAP_64BIT_SHARED))) {

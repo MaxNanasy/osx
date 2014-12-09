@@ -1,31 +1,29 @@
 /*
  * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code 
- * as defined in and that are subject to the Apple Public Source License 
- * Version 2.0 (the 'License'). You may not use this file except in 
- * compliance with the License.  The rights granted to you under the 
- * License may not be used to create, or enable the creation or 
- * redistribution of, unlawful or unlicensed copies of an Apple operating 
- * system, or to circumvent, violate, or enable the circumvention or 
- * violation of, any terms of an Apple operating system software license 
- * agreement.
- *
- * Please obtain a copy of the License at 
- * http://www.opensource.apple.com/apsl/ and read it before using this 
- * file.
- *
- * The Original Code and all software distributed under the License are 
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
- * Please see the License for the specific language governing rights and 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
  * limitations under the License.
- *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 /* Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved */
 /*
@@ -273,41 +271,52 @@ fhopen( proc_t p,
 	struct fileproc *fp, *nfp;
 	int fmode, error, type;
 	int indx;
-	kauth_cred_t cred = proc_ucred(p);
 	struct vfs_context context;
 	kauth_action_t action;
 
 	context.vc_proc = p;
-	context.vc_ucred = cred;
+	context.vc_ucred = kauth_cred_proc_ref(p);
 
 	/*
 	 * Must be super user
 	 */
-	error = suser(cred, 0);
-	if (error)
+	error = suser(context.vc_ucred, 0);
+	if (error) {
+		kauth_cred_unref(&context.vc_ucred);
 		return (error);
+	}
 
 	fmode = FFLAGS(uap->flags);
 	/* why not allow a non-read/write open for our lockd? */
-	if (((fmode & (FREAD | FWRITE)) == 0) || (fmode & O_CREAT))
+	if (((fmode & (FREAD | FWRITE)) == 0) || (fmode & O_CREAT)) {
+		kauth_cred_unref(&context.vc_ucred);
 		return (EINVAL);
+	}
 
 	error = copyin(uap->u_fhp, &nfh.nfh_len, sizeof(nfh.nfh_len));
-	if (error)
+	if (error) {
+		kauth_cred_unref(&context.vc_ucred);
 		return (error);
+	}
 	if ((nfh.nfh_len < (int)sizeof(struct nfs_exphandle)) ||
-	    (nfh.nfh_len > (int)NFS_MAX_FH_SIZE))
+	    (nfh.nfh_len > (int)NFS_MAX_FH_SIZE)) {
+		kauth_cred_unref(&context.vc_ucred);
 		return (EINVAL);
+	}
 	error = copyin(uap->u_fhp, &nfh, sizeof(nfh.nfh_len) + nfh.nfh_len);
-	if (error)
+	if (error) {
+		kauth_cred_unref(&context.vc_ucred);
 		return (error);
+	}
 
 	lck_rw_lock_shared(&nfs_export_rwlock);
 	/* now give me my vnode, it gets returned to me with a reference */
 	error = nfsrv_fhtovp(&nfh, NULL, TRUE, &vp, &nx, &nxo);
 	lck_rw_done(&nfs_export_rwlock);
-	if (error)
+	if (error) {
+		kauth_cred_unref(&context.vc_ucred);
 		return (error);
+	}
 
 	/*
 	 * From now on we have to make sure not
@@ -350,7 +359,7 @@ fhopen( proc_t p,
 
 	// starting here... error paths should call vn_close/vnode_put
 	if ((error = falloc(p, &nfp, &indx)) != 0) {
-		vn_close(vp, fmode & FMASK, cred, p);
+		vn_close(vp, fmode & FMASK, context.vc_ucred, p);
 		goto bad;
 	}
 	fp = nfp;
@@ -375,6 +384,7 @@ fhopen( proc_t p,
 		if ((error = VNOP_ADVLOCK(vp, (caddr_t)fp->f_fglob, F_SETLK, &lf, type, &context))) {
 			vn_close(vp, fp->f_fglob->fg_flag, fp->f_fglob->fg_cred, p);
 			fp_free(p, indx, fp);
+			kauth_cred_unref(&context.vc_ucred);
 			return (error);
 		}
 		fp->f_fglob->fg_flag |= FHASLOCK;
@@ -388,10 +398,12 @@ fhopen( proc_t p,
 	proc_fdunlock(p);
 
 	*retval = indx;
+	kauth_cred_unref(&context.vc_ucred);
 	return (0);
 
 bad:
 	vnode_put(vp);
+	kauth_cred_unref(&context.vc_ucred);
 	return (error);
 }
 
@@ -524,7 +536,9 @@ nfssvc(proc_t p, struct nfssvc_args *uap, __unused int *retval)
 					break;
 			}
 			if (nuidp) {
-			    nfsrv_setcred(nuidp->nu_cr,nfsd->nfsd_nd->nd_cr);
+			    nfsrv_setcred(nuidp->nu_cr,&temp_cred);
+			    kauth_cred_unref(&nfsd->nfsd_nd->nd_cr);
+			    nfsd->nfsd_nd->nd_cr = kauth_cred_create(&temp_cred);
 			    nfsd->nfsd_nd->nd_flag |= ND_KERBFULL;
 			} else {
 			    /*
@@ -553,7 +567,7 @@ nfssvc(proc_t p, struct nfssvc_args *uap, __unused int *retval)
 					nu_lru);
 				    if (nuidp->nu_flag & NU_NAM)
 					mbuf_freem(nuidp->nu_nam);
-				    kauth_cred_rele(nuidp->nu_cr);
+				    kauth_cred_unref(&nuidp->nu_cr);
 				}
 				nuidp->nu_flag = 0;
 
@@ -593,7 +607,7 @@ nfssvc(proc_t p, struct nfssvc_args *uap, __unused int *retval)
 							MBUF_COPYALL, MBUF_WAITOK,
 							&nuidp->nu_nam);
 					if (error) {
-						kauth_cred_rele(nuidp->nu_cr);
+						kauth_cred_unref(&nuidp->nu_cr);
 						FREE_ZONE(nuidp, sizeof(struct nfsuid), M_NFSUID);
 						slp->ns_numuids--;
 						return (error);
@@ -605,8 +619,9 @@ nfssvc(proc_t p, struct nfssvc_args *uap, __unused int *retval)
 					nu_lru);
 				LIST_INSERT_HEAD(NUIDHASH(slp, nsd->nsd_uid),
 					nuidp, nu_hash);
-				nfsrv_setcred(nuidp->nu_cr,
-				    nfsd->nfsd_nd->nd_cr);
+				nfsrv_setcred(nuidp->nu_cr,&temp_cred);
+				kauth_cred_unref(&nfsd->nfsd_nd->nd_cr);
+				nfsd->nfsd_nd->nd_cr = kauth_cred_create(&temp_cred);
 				nfsd->nfsd_nd->nd_flag |= ND_KERBFULL;
 			    }
 			}
@@ -704,7 +719,7 @@ nfskerb_clientd(
 		nnuidp = nuidp->nu_lru.tqe_next;
 		LIST_REMOVE(nuidp, nu_hash);
 		TAILQ_REMOVE(&nmp->nm_uidlruhead, nuidp, nu_lru);
-		kauth_cred_rele(nuidp->nu_cr);
+		kauth_cred_unref(&nuidp->nu_cr);
 		FREE_ZONE((caddr_t)nuidp, sizeof (struct nfsuid), M_NFSUID);
 	}
 	/*
@@ -947,8 +962,8 @@ nfssvc_nfsd(nsd, argp, p)
 			if (nd) {
 				if (nd->nd_nam2)
 					mbuf_freem(nd->nd_nam2);
-				if (nd->nd_cr)
-					kauth_cred_rele(nd->nd_cr);
+				if (IS_VALID_CRED(nd->nd_cr))
+					kauth_cred_unref(&nd->nd_cr);
 				FREE_ZONE((caddr_t)nd,
 						sizeof *nd, M_NFSRVDESC);
 				nd = NULL;
@@ -1095,8 +1110,8 @@ nfssvc_nfsd(nsd, argp, p)
 				lck_rw_done(&slp->ns_rwlock);
 			}
 			if (error == EINTR || error == ERESTART) {
-				if (nd->nd_cr)
-					kauth_cred_rele(nd->nd_cr);
+				if (IS_VALID_CRED(nd->nd_cr))
+					kauth_cred_unref(&nd->nd_cr);
 				FREE_ZONE((caddr_t)nd, sizeof *nd, M_NFSRVDESC);
 				nfsrv_slpderef(slp);
 				goto done;
@@ -1115,8 +1130,8 @@ nfssvc_nfsd(nsd, argp, p)
 				mbuf_freem(nd->nd_mrep);
 			if (nd->nd_nam2)
 				mbuf_freem(nd->nd_nam2);
-			if (nd->nd_cr)
-				kauth_cred_rele(nd->nd_cr);
+			if (IS_VALID_CRED(nd->nd_cr))
+				kauth_cred_unref(&nd->nd_cr);
 			FREE_ZONE((caddr_t)nd, sizeof *nd, M_NFSRVDESC);
 			nd = NULL;
 		    }
@@ -1268,6 +1283,7 @@ nfssvc_iod_continue(int error)
 	struct nfsmount *nmp;
 	struct uthread *ut;
 	proc_t p;
+	int exiterror = 0;
 
 	/*
 	 * real myiod is stored in uthread, recover it
@@ -1293,9 +1309,21 @@ nfssvc_iod_continue(int error)
 			PWAIT | PCATCH | PDROP, "nfsidl", 0, nfssvc_iod_continue);
 		lck_mtx_lock(nfs_iod_mutex);
 	    }
+	    if (error && !exiterror && nmp && (nmp->nm_bufqiods == 1) &&
+	        !TAILQ_EMPTY(&nmp->nm_bufq)) {
+		/*
+		 * Finish processing the queued buffers before exitting.
+		 * Decrement the iod count now to make sure nfs_asyncio()
+		 * doesn't keep queueing up more work.
+		 */
+		nmp->nm_bufqiods--;
+		exiterror = error;
+		error = 0;
+	    }
 	    if (error) {
 		nfs_asyncdaemon[myiod] = 0;
-		if (nmp) nmp->nm_bufqiods--;
+		if (nmp && !exiterror)
+			nmp->nm_bufqiods--;
 		nfs_iodwant[myiod] = NULL;
 		nfs_iodmount[myiod] = NULL;
 		lck_mtx_unlock(nfs_iod_mutex);
@@ -1329,7 +1357,7 @@ nfssvc_iod_continue(int error)
 		     * If there are more than one iod on this mount, then defect
 		     * so that the iods can be shared out fairly between the mounts
 		     */
-		    if (nfs_defect && nmp->nm_bufqiods > 1) {
+		    if (!exiterror && nfs_defect && nmp->nm_bufqiods > 1) {
 			nfs_iodmount[myiod] = NULL;
 			nmp->nm_bufqiods--;
 			break;
@@ -1355,6 +1383,8 @@ nfssvc_iod_continue(int error)
 				nfs_buf_drop(bp);
 				continue;
 			}
+			if (ISSET(bp->nb_flags, NB_NEEDCOMMIT))
+				nfs_buf_check_write_verifier(np, bp);
 			if (ISSET(bp->nb_flags, NB_NEEDCOMMIT)) {
 				/* put buffer at end of delwri list */
 				TAILQ_INSERT_TAIL(&nfsbufdelwri, bp, nb_free);
@@ -1374,6 +1404,8 @@ nfssvc_iod_continue(int error)
 	    }
 
 	    lck_mtx_lock(nfs_iod_mutex);
+	    if (exiterror)
+	    	error = exiterror;
 	}
 }
 
@@ -1609,7 +1641,7 @@ nfs_savenickauth(nmp, cred, len, key, mdp, dposp, mrep)
 				}
 				LIST_REMOVE(nuidp, nu_hash);
 				TAILQ_REMOVE(&nmp->nm_uidlruhead, nuidp, nu_lru);
-				kauth_cred_rele(nuidp->nu_cr);
+				kauth_cred_unref(&nuidp->nu_cr);
 			}
 			nuidp->nu_flag = 0;
 			kauth_cred_ref(cred);
@@ -1660,7 +1692,7 @@ nfsrv_slpfree(struct nfssvc_sock *slp)
 		TAILQ_REMOVE(&slp->ns_uidlruhead, nuidp, nu_lru);
 		if (nuidp->nu_flag & NU_NAM)
 			mbuf_freem(nuidp->nu_nam);
-		kauth_cred_rele(nuidp->nu_cr);
+		kauth_cred_unref(&nuidp->nu_cr);
 		FREE_ZONE((caddr_t)nuidp,
 				sizeof (struct nfsuid), M_NFSUID);
 	}
@@ -1668,8 +1700,8 @@ nfsrv_slpfree(struct nfssvc_sock *slp)
 	for (nwp = slp->ns_tq.lh_first; nwp; nwp = nnwp) {
 		nnwp = nwp->nd_tq.le_next;
 		LIST_REMOVE(nwp, nd_tq);
-		if (nwp->nd_cr)
-			kauth_cred_rele(nwp->nd_cr);
+		if (IS_VALID_CRED(nwp->nd_cr))
+			kauth_cred_unref(&nwp->nd_cr);
 		FREE_ZONE((caddr_t)nwp, sizeof *nwp, M_NFSRVDESC);
 	}
 	LIST_INIT(&slp->ns_tq);

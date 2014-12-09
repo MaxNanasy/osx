@@ -1,31 +1,29 @@
 /*
  * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
- * This file contains Original Code and/or Modifications of Original Code 
- * as defined in and that are subject to the Apple Public Source License 
- * Version 2.0 (the 'License'). You may not use this file except in 
- * compliance with the License.  The rights granted to you under the 
- * License may not be used to create, or enable the creation or 
- * redistribution of, unlawful or unlicensed copies of an Apple operating 
- * system, or to circumvent, violate, or enable the circumvention or 
- * violation of, any terms of an Apple operating system software license 
- * agreement.
- *
- * Please obtain a copy of the License at 
- * http://www.opensource.apple.com/apsl/ and read it before using this 
- * file.
- *
- * The Original Code and all software distributed under the License are 
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
- * Please see the License for the specific language governing rights and 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. The rights granted to you under the License
+ * may not be used to create, or enable the creation or redistribution of,
+ * unlawful or unlicensed copies of an Apple operating system, or to
+ * circumvent, violate, or enable the circumvention or violation of, any
+ * terms of an Apple operating system software license agreement.
+ * 
+ * Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
  * limitations under the License.
- *
- * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
+ * 
+ * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 /*
  * Copyright (c) 1982, 1986, 1989, 1991, 1993
@@ -640,13 +638,17 @@ unp_bind(
 	char buf[SOCK_MAXADDRLEN];
 
 	context.vc_proc = p;
-	context.vc_ucred = p->p_ucred;	/* XXX kauth_cred_get() ??? proxy */
+	context.vc_ucred = kauth_cred_proc_ref(p);	/* XXX kauth_cred_get() ??? proxy */
 
-	if (unp->unp_vnode != NULL)
+	if (unp->unp_vnode != NULL) {
+		kauth_cred_unref(&context.vc_ucred);
 		return (EINVAL);
+	}
 	namelen = soun->sun_len - offsetof(struct sockaddr_un, sun_path);
-	if (namelen <= 0)
+	if (namelen <= 0) {
+		kauth_cred_unref(&context.vc_ucred);
 		return EINVAL;
+	}
 	strncpy(buf, soun->sun_path, namelen);
 	buf[namelen] = 0;	/* null-terminate the string */
 	NDINIT(&nd, CREATE, FOLLOW | LOCKPARENT, UIO_SYSSPACE32,
@@ -654,6 +656,7 @@ unp_bind(
 /* SHOULD BE ABLE TO ADOPT EXISTING AND wakeup() ALA FIFO's */
 	error = namei(&nd);
 	if (error) {
+		kauth_cred_unref(&context.vc_ucred);
 		return (error);
 	}
 	dvp = nd.ni_dvp;
@@ -669,6 +672,7 @@ unp_bind(
 		vnode_put(dvp);
 		vnode_put(vp);
 
+		kauth_cred_unref(&context.vc_ucred);
 		return (EADDRINUSE);
 	}
 
@@ -688,6 +692,7 @@ unp_bind(
 	vnode_put(dvp);
 
 	if (error) {
+		kauth_cred_unref(&context.vc_ucred);
 		return (error);
 	}
 	vnode_ref(vp);	/* gain a longterm reference */
@@ -696,6 +701,7 @@ unp_bind(
 	unp->unp_addr = (struct sockaddr_un *)dup_sockaddr(nam, 1);
 	vnode_put(vp);		/* drop the iocount */
 
+	kauth_cred_unref(&context.vc_ucred);
 	return (0);
 }
 
@@ -715,18 +721,21 @@ unp_connect(
 	char buf[SOCK_MAXADDRLEN];
 
 	context.vc_proc = p;
-	context.vc_ucred = p->p_ucred;	/* XXX kauth_cred_get() ??? proxy */
+	context.vc_ucred = kauth_cred_proc_ref(p);	/* XXX kauth_cred_get() ??? proxy */
 	so2 = so3 = NULL;
 
 	len = nam->sa_len - offsetof(struct sockaddr_un, sun_path);
-	if (len <= 0)
+	if (len <= 0) {
+		kauth_cred_unref(&context.vc_ucred);
 		return EINVAL;
+	}
 	strncpy(buf, soun->sun_path, len);
 	buf[len] = 0;
 
 	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE32, CAST_USER_ADDR_T(buf), &context);
 	error = namei(&nd);
 	if (error) {
+		kauth_cred_unref(&context.vc_ucred);
 		return (error);
 	}
 	nameidone(&nd);
@@ -784,7 +793,7 @@ unp_connect(
 		 * from its process structure at the time of connect()
 		 * (which is now).
 		 */
-		cru2x(p->p_ucred, &unp3->unp_peercred);
+		cru2x(context.vc_ucred, &unp3->unp_peercred);
 		unp3->unp_flags |= UNP_HAVEPC;
 		/*
 		 * The receiver's (server's) credentials are copied
@@ -810,6 +819,7 @@ bad:
 			so2->so_usecount--;	/* release count on socket */
 	
 	vnode_put(vp);
+	kauth_cred_unref(&context.vc_ucred);
 	return (error);
 }
 
@@ -1370,8 +1380,9 @@ unp_listen(
 	struct unpcb *unp,
 	struct proc *p)
 {
-
-	cru2x(p->p_ucred, &unp->unp_peercred);
+	kauth_cred_t safecred = kauth_cred_proc_ref(p);
+	cru2x(safecred, &unp->unp_peercred);
+	kauth_cred_unref(&safecred);
 	unp->unp_flags |= UNP_HAVEPCCACHED;
 	return (0);
 }
