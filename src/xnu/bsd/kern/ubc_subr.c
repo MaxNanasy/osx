@@ -1,23 +1,31 @@
 /*
  * Copyright (c) 1999-2004 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
  * 
- * The contents of this file constitute Original Code as defined in and
- * are subject to the Apple Public Source License Version 1.1 (the
- * "License").  You may not use this file except in compliance with the
- * License.  Please obtain a copy of the License at
- * http://www.apple.com/publicsource and read it before using this file.
- * 
- * This Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
+ * This file contains Original Code and/or Modifications of Original Code 
+ * as defined in and that are subject to the Apple Public Source License 
+ * Version 2.0 (the 'License'). You may not use this file except in 
+ * compliance with the License.  The rights granted to you under the 
+ * License may not be used to create, or enable the creation or 
+ * redistribution of, unlawful or unlicensed copies of an Apple operating 
+ * system, or to circumvent, violate, or enable the circumvention or 
+ * violation of, any terms of an Apple operating system software license 
+ * agreement.
+ *
+ * Please obtain a copy of the License at 
+ * http://www.opensource.apple.com/apsl/ and read it before using this 
+ * file.
+ *
+ * The Original Code and all software distributed under the License are 
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
+ * Please see the License for the specific language governing rights and 
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
  */
 /* 
  *	File:	ubc_subr.c
@@ -45,6 +53,7 @@
 #include <sys/proc_internal.h>
 #include <sys/kauth.h>
 #include <sys/buf.h>
+#include <sys/user.h>
 
 #include <mach/mach_types.h>
 #include <mach/memory_object_types.h>
@@ -54,6 +63,7 @@
 
 #include <kern/kern_types.h>
 #include <kern/zalloc.h>
+#include <kern/thread.h>
 #include <vm/vm_kern.h>
 #include <vm/vm_protos.h> /* last */
 
@@ -68,9 +78,9 @@
 #endif /* DIAGNOSTIC */
 
 int ubc_info_init_internal(struct vnode *vp, int withfsize, off_t filesize);
-int ubc_umcallback(vnode_t, void *);
+static int ubc_umcallback(vnode_t, void *);
 int ubc_isinuse_locked(vnode_t, int, int);
-int ubc_msync_internal(vnode_t, off_t, off_t, off_t *, int, int *);
+static int ubc_msync_internal(vnode_t, off_t, off_t, off_t *, int, int *);
 
 struct zone	*ubc_info_zone;
 
@@ -344,6 +354,35 @@ ubc_getcred(struct vnode *vp)
 	        return (vp->v_ubcinfo->ui_ucred);
 
 	return (NOCRED);
+}
+
+int
+ubc_setthreadcred(struct vnode *vp, struct proc *p, thread_t thread)
+{
+	struct ubc_info *uip;
+	kauth_cred_t credp;
+	struct uthread *uthread = get_bsdthread_info(thread);
+
+	if (!UBCINFOEXISTS(vp))
+		return (1);
+
+	vnode_lock(vp);
+
+	uip = vp->v_ubcinfo;
+	credp = uip->ui_ucred;
+
+	if (credp == NOCRED) {
+		/* use per-thread cred, if assumed identity, else proc cred */
+		if (uthread == NULL || (uthread->uu_flag & UT_SETUID) == 0) {
+			uip->ui_ucred = kauth_cred_proc_ref(p);
+		} else {
+			uip->ui_ucred = uthread->uu_ucred;
+			kauth_cred_ref(uip->ui_ucred);
+		}
+	}
+	vnode_unlock(vp);
+
+	return (0);
 }
 
 /*

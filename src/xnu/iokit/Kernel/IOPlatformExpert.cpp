@@ -1,23 +1,31 @@
 /*
  * Copyright (c) 1998-2000 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
  * 
- * The contents of this file constitute Original Code as defined in and
- * are subject to the Apple Public Source License Version 1.1 (the
- * "License").  You may not use this file except in compliance with the
- * License.  Please obtain a copy of the License at
- * http://www.apple.com/publicsource and read it before using this file.
- * 
- * This Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
+ * This file contains Original Code and/or Modifications of Original Code 
+ * as defined in and that are subject to the Apple Public Source License 
+ * Version 2.0 (the 'License'). You may not use this file except in 
+ * compliance with the License.  The rights granted to you under the 
+ * License may not be used to create, or enable the creation or 
+ * redistribution of, unlawful or unlicensed copies of an Apple operating 
+ * system, or to circumvent, violate, or enable the circumvention or 
+ * violation of, any terms of an Apple operating system software license 
+ * agreement.
+ *
+ * Please obtain a copy of the License at 
+ * http://www.opensource.apple.com/apsl/ and read it before using this 
+ * file.
+ *
+ * The Original Code and all software distributed under the License are 
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
+ * Please see the License for the specific language governing rights and 
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
  */
 /*
  * HISTORY
@@ -44,6 +52,9 @@ extern "C" {
 #include <machine/machine_routines.h>
 #include <pexpert/pexpert.h>
 }
+
+/* Delay period for UPS halt */
+#define kUPSDelayHaltCPU_msec   (1000*60*5)
 
 void printDictionaryKeys (OSDictionary * inDictionary, char * inMsg);
 static void getCStringForObject (OSObject * inObj, char * outStr);
@@ -240,17 +251,15 @@ int (*PE_halt_restart)(unsigned int type) = 0;
 
 int IOPlatformExpert::haltRestart(unsigned int type)
 {
-  IOPMrootDomain *rd = getPMRootDomain();
-  OSBoolean   *b = 0;
-    
-  if(rd) b = (OSBoolean *)OSDynamicCast(OSBoolean, rd->getProperty(OSString::withCString("StallSystemAtHalt")));
-
   if (type == kPEHangCPU) while (1);
 
-  if (kOSBooleanTrue == b) {
-    // Stall shutdown for 5 minutes, and if no outside force has removed our power, continue with
-    // a reboot.
-    IOSleep(1000*60*5);
+  if (type == kPEUPSDelayHaltCPU) {
+    // Stall shutdown for 5 minutes, and if no outside force has 
+    // removed our power at that point, proceed with a reboot.
+    IOSleep( kUPSDelayHaltCPU_msec );
+
+    // Ideally we never reach this point.
+
     type = kPERestartCPU;
   }
   
@@ -724,15 +733,17 @@ static void getCStringForObject (OSObject * inObj, char * outStr)
    }
 }
 
-/* IOPMPanicOnShutdownHang
+/* IOShutdownNotificationsTimedOut
  * - Called from a timer installed by PEHaltRestart
  */
-static void IOPMPanicOnShutdownHang(thread_call_param_t p0, thread_call_param_t p1)
+static void IOShutdownNotificationsTimedOut(
+    thread_call_param_t p0, 
+    thread_call_param_t p1)
 {
     int type = (int)p0;
 
     /* 30 seconds has elapsed - resume shutdown */
-    gIOPlatform->haltRestart(type);
+    if(gIOPlatform) gIOPlatform->haltRestart(type);
 }
 
 
@@ -772,8 +783,9 @@ int PEHaltRestart(unsigned int type)
   bool              noWaitForResponses;
   AbsoluteTime      deadline;
   thread_call_t     shutdown_hang;
+  unsigned int      tell_type;
   
-  if(type == kPEHaltCPU || type == kPERestartCPU)
+  if(type == kPEHaltCPU || type == kPERestartCPU || type == kPEUPSDelayHaltCPU)
   {
     /* Notify IOKit PM clients of shutdown/restart
        Clients subscribe to this message with a call to
@@ -784,11 +796,19 @@ int PEHaltRestart(unsigned int type)
        If all goes well the machine will be off by the time
        the timer expires.
      */
-    shutdown_hang = thread_call_allocate( &IOPMPanicOnShutdownHang, (thread_call_param_t) type);
+    shutdown_hang = thread_call_allocate( &IOShutdownNotificationsTimedOut, 
+                        (thread_call_param_t) type);
     clock_interval_to_deadline( 30, kSecondScale, &deadline );
     thread_call_enter1_delayed( shutdown_hang, 0, deadline );
     
-    noWaitForResponses = pmRootDomain->tellChangeDown2(type); 
+
+    if( kPEUPSDelayHaltCPU == type ) {
+        tell_type = kPEHaltCPU;
+    } else {
+        tell_type = type;
+    }
+
+    noWaitForResponses = pmRootDomain->tellChangeDown2(tell_type); 
     /* This notification should have few clients who all do 
        their work synchronously.
              
@@ -812,16 +832,18 @@ UInt32 PESavePanicInfo(UInt8 *buffer, UInt32 length)
 
 long PEGetGMTTimeOfDay(void)
 {
+	long	result = 0;
+
     if( gIOPlatform)
-	return( gIOPlatform->getGMTTimeOfDay());
-    else
-	return( 0 );
+		result = gIOPlatform->getGMTTimeOfDay();
+
+	return (result);
 }
 
 void PESetGMTTimeOfDay(long secs)
 {
     if( gIOPlatform)
-	gIOPlatform->setGMTTimeOfDay(secs);
+		gIOPlatform->setGMTTimeOfDay(secs);
 }
 
 } /* extern "C" */
@@ -1212,6 +1234,12 @@ void IOPlatformExpertDevice::free()
 {
     if (workLoop)
         workLoop->release();
+}
+
+bool IOPlatformExpertDevice::attachToChild( IORegistryEntry * child,
+                                        const IORegistryPlane * plane )
+{
+    return IOService::attachToChild( child, plane );
 }
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */

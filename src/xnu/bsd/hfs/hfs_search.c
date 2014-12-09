@@ -1,23 +1,31 @@
 /*
  * Copyright (c) 1997-2004 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
  * 
- * The contents of this file constitute Original Code as defined in and
- * are subject to the Apple Public Source License Version 1.1 (the
- * "License").  You may not use this file except in compliance with the
- * License.  Please obtain a copy of the License at
- * http://www.apple.com/publicsource and read it before using this file.
- * 
- * This Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
+ * This file contains Original Code and/or Modifications of Original Code 
+ * as defined in and that are subject to the Apple Public Source License 
+ * Version 2.0 (the 'License'). You may not use this file except in 
+ * compliance with the License.  The rights granted to you under the 
+ * License may not be used to create, or enable the creation or 
+ * redistribution of, unlawful or unlicensed copies of an Apple operating 
+ * system, or to circumvent, violate, or enable the circumvention or 
+ * violation of, any terms of an Apple operating system software license 
+ * agreement.
+ *
+ * Please obtain a copy of the License at 
+ * http://www.opensource.apple.com/apsl/ and read it before using this 
+ * file.
+ *
+ * The Original Code and all software distributed under the License are 
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
+ * Please see the License for the specific language governing rights and 
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
  *
  *	@(#)hfs_search.c
  */
@@ -99,7 +107,7 @@ static int CheckCriteria(	ExtendedVCB *vcb,
 							searchinfospec_t *searchInfo2,
 							Boolean lookForDup );
 
-static int CheckAccess(ExtendedVCB *vcb, u_long searchBits, CatalogKey *key, struct proc *p);
+static int CheckAccess(ExtendedVCB *vcb, u_long searchBits, CatalogKey *key, struct vfs_context *ctx);
 
 static int InsertMatch(struct hfsmount *hfsmp, uio_t a_uio, CatalogRecord *rec,
 			CatalogKey *key, struct attrlist *returnAttrList,
@@ -206,7 +214,7 @@ hfs_vnop_search(ap)
 		attrs = ap->a_searchattrs->commonattr | ap->a_returnattrs->commonattr;
 		if (attrs & (ATTR_CMN_NAME | ATTR_CMN_PAROBJID))
 			return (EINVAL);
-		if ((err = suser(kauth_cred_get(), 0)))
+		if ((err = vfs_context_suser(ap->a_context)))
 			return (err);
 	}
 
@@ -307,7 +315,7 @@ hfs_vnop_search(ap)
 				hfs_systemfile_unlock(hfsmp, lockflags);
 				if (CheckCriteria(vcb, ap->a_options, ap->a_searchattrs, &rec,
 								  keyp, &searchInfo1, &searchInfo2, false) &&
-					CheckAccess(vcb, ap->a_options, keyp, p)) {
+					CheckAccess(vcb, ap->a_options, keyp, ap->a_context)) {
 		
 					result = InsertMatch(hfsmp, ap->a_uio, &rec, 
 									  keyp, ap->a_returnattrs,
@@ -365,7 +373,7 @@ hfs_vnop_search(ap)
 		}
 		if (CheckCriteria( vcb, ap->a_options, ap->a_searchattrs, myCurrentDataPtr,
 				myCurrentKeyPtr, &searchInfo1, &searchInfo2, true )
-		&&  CheckAccess(vcb, ap->a_options, myCurrentKeyPtr, p)) {
+		&&  CheckAccess(vcb, ap->a_options, myCurrentKeyPtr, ap->a_context)) {
 			err = InsertMatch(hfsmp, ap->a_uio, myCurrentDataPtr, 
 					myCurrentKeyPtr, ap->a_returnattrs,
 					attributesBuffer, variableBuffer, ap->a_nummatches);
@@ -537,7 +545,7 @@ is_inappropriate_name(char *name, int len)
  */
 
 static int
-CheckAccess(ExtendedVCB *theVCBPtr, u_long searchBits, CatalogKey *theKeyPtr, struct proc *theProcPtr)
+CheckAccess(ExtendedVCB *theVCBPtr, u_long searchBits, CatalogKey *theKeyPtr, struct vfs_context *ctx)
 {
 	Boolean				isHFSPlus;
 	int					myErr;
@@ -546,13 +554,10 @@ CheckAccess(ExtendedVCB *theVCBPtr, u_long searchBits, CatalogKey *theKeyPtr, st
 	hfsmount_t *		hfsmp;
 	struct FndrDirInfo	*finfop;
 	struct vnode * 		vp = NULL;
-	struct vfs_context 	my_context;
 
 	myResult = 0;	/* default to "no access" */
-	my_context.vc_proc = theProcPtr;
-	my_context.vc_ucred = kauth_cred_get();
 		
-	if (!proc_suser(theProcPtr)) {
+	if (!vfs_context_suser(ctx))  {
 		myResult = 1;	/* allow access */
 		goto ExitThisRoutine; /* root always has access */
 	}
@@ -602,9 +607,9 @@ CheckAccess(ExtendedVCB *theVCBPtr, u_long searchBits, CatalogKey *theKeyPtr, st
 		myNodeID = cp->c_parentcnid;	/* move up the hierarchy */
 		hfs_unlock(VTOC(vp));
 		if (vp->v_type == VDIR) {
-		    myErr = vnode_authorize(vp, NULL, (KAUTH_VNODE_SEARCH | KAUTH_VNODE_LIST_DIRECTORY), &my_context);
+		    myErr = vnode_authorize(vp, NULL, (KAUTH_VNODE_SEARCH | KAUTH_VNODE_LIST_DIRECTORY), ctx);
 		} else {
-		    myErr = vnode_authorize(vp, NULL, (KAUTH_VNODE_SEARCH), &my_context);
+		    myErr = vnode_authorize(vp, NULL, (KAUTH_VNODE_SEARCH), ctx);
 		}
 		vnode_put(vp);
 		vp = NULL;

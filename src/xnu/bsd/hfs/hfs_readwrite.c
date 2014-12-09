@@ -1,23 +1,31 @@
 /*
  * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
  * 
- * The contents of this file constitute Original Code as defined in and
- * are subject to the Apple Public Source License Version 1.1 (the
- * "License").  You may not use this file except in compliance with the
- * License.  Please obtain a copy of the License at
- * http://www.apple.com/publicsource and read it before using this file.
- * 
- * This Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
+ * This file contains Original Code and/or Modifications of Original Code 
+ * as defined in and that are subject to the Apple Public Source License 
+ * Version 2.0 (the 'License'). You may not use this file except in 
+ * compliance with the License.  The rights granted to you under the 
+ * License may not be used to create, or enable the creation or 
+ * redistribution of, unlawful or unlicensed copies of an Apple operating 
+ * system, or to circumvent, violate, or enable the circumvention or 
+ * violation of, any terms of an Apple operating system software license 
+ * agreement.
+ *
+ * Please obtain a copy of the License at 
+ * http://www.opensource.apple.com/apsl/ and read it before using this 
+ * file.
+ *
+ * The Original Code and all software distributed under the License are 
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
+ * Please see the License for the specific language governing rights and 
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
  */
 /*	@(#)hfs_readwrite.c	1.0
  *
@@ -852,6 +860,18 @@ hfs_vnop_ioctl( struct vnop_ioctl_args /* {
 
 	switch (ap->a_command) {
 
+	case HFS_RESIZE_PROGRESS: {
+
+		vfsp = vfs_statfs(HFSTOVFS(hfsmp));
+		if (suser(cred, NULL) &&
+			kauth_cred_getuid(cred) != vfsp->f_owner) {
+			return (EACCES); /* must be owner of file system */
+		}
+		if (!vnode_isvroot(vp)) {
+			return (EINVAL);
+		}
+		return hfs_resize_progress(hfsmp, (u_int32_t *)ap->a_data);
+	}
 	case HFS_RESIZE_VOLUME: {
 		u_int64_t newsize;
 		u_int64_t cursize;
@@ -1158,6 +1178,7 @@ hfs_vnop_ioctl( struct vnop_ioctl_args /* {
 			goto err_exit_bulk_access;
 		}
 		myucred.cr_rgid = myucred.cr_svgid = myucred.cr_groups[0];
+		myucred.cr_gmuid = myucred.cr_uid;
 		
 		my_context.vc_proc = p;
 		my_context.vc_ucred = &myucred;
@@ -1812,6 +1833,7 @@ do_hfs_truncate(struct vnode *vp, off_t length, int flags, int skipsetsize, vfs_
 	off_t bytesToAdd;
 	off_t actualBytesAdded;
 	off_t filebytes;
+	u_int64_t old_filesize;
 	u_long fileblocks;
 	int blksize;
 	struct hfsmount *hfsmp;
@@ -1820,6 +1842,7 @@ do_hfs_truncate(struct vnode *vp, off_t length, int flags, int skipsetsize, vfs_
 	blksize = VTOVCB(vp)->blockSize;
 	fileblocks = fp->ff_blocks;
 	filebytes = (off_t)fileblocks * (off_t)blksize;
+	old_filesize = fp->ff_size;
 
 	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 7)) | DBG_FUNC_START,
 		 (int)length, (int)fp->ff_size, (int)filebytes, 0, 0);
@@ -2070,6 +2093,9 @@ do_hfs_truncate(struct vnode *vp, off_t length, int flags, int skipsetsize, vfs_
 				hfs_systemfile_unlock(hfsmp, lockflags);
 			}
 			if (hfsmp->jnl) {
+				if (retval == 0) {
+					fp->ff_size = length;
+				}
 				(void) hfs_update(vp, TRUE);
 				(void) hfs_volupdate(hfsmp, VOL_UPDATE, 0);
 			}
@@ -2085,7 +2111,7 @@ do_hfs_truncate(struct vnode *vp, off_t length, int flags, int skipsetsize, vfs_
 #endif /* QUOTA */
 		}
 		/* Only set update flag if the logical length changes */
-		if ((off_t)fp->ff_size != length)
+		if (old_filesize != length)
 			cp->c_touch_modtime = TRUE;
 		fp->ff_size = length;
 	}
@@ -2488,6 +2514,12 @@ hfs_vnop_pageout(struct vnop_pageout_args *ap)
 		      cp->c_desc.cd_nameptr ? cp->c_desc.cd_nameptr : "");
 	}
 	if ( (retval = hfs_lock(cp, HFS_EXCLUSIVE_LOCK))) {
+		if (!(ap->a_flags & UPL_NOCOMMIT)) {
+		        ubc_upl_abort_range(ap->a_pl,
+					    ap->a_pl_offset,
+					    ap->a_size,
+					    UPL_ABORT_FREE_ON_EMPTY);
+		}
 		return (retval);
 	}
 	fp = VTOF(vp);
@@ -2537,7 +2569,8 @@ hfs_vnop_bwrite(struct vnop_bwrite_args *ap)
 	/* Trap B-Tree writes */
 	if ((VTOC(vp)->c_fileid == kHFSExtentsFileID) ||
 	    (VTOC(vp)->c_fileid == kHFSCatalogFileID) ||
-	    (VTOC(vp)->c_fileid == kHFSAttributesFileID)) {
+	    (VTOC(vp)->c_fileid == kHFSAttributesFileID) ||
+	    (vp == VTOHFS(vp)->hfc_filevp)) {
 
 		/* 
 		 * Swap and validate the node if it is in native byte order.
@@ -2806,10 +2839,10 @@ out:
 		lockflags = 0;
 	}
 
-	// See comment up above about calls to hfs_fsync()
-	//
-	//if (retval == 0)
-	//	retval = hfs_fsync(vp, MNT_WAIT, 0, p);
+	/* Push cnode's new extent data to disk. */
+	if (retval == 0) {
+		(void) hfs_update(vp, MNT_WAIT);
+	}
 
 	if (hfsmp->jnl) {
 		if (cp->c_cnid < kHFSFirstUserCatalogNodeID)
@@ -2903,7 +2936,7 @@ hfs_clonefile(struct vnode *vp, int blkstart, int blkcnt, int blksize)
 	filesize = VTOF(vp)->ff_blocks * blksize;  /* virtual file size */
 	writebase = blkstart * blksize;
 	copysize = blkcnt * blksize;
-	iosize = bufsize = MIN(copysize, 4096 * 16);
+	iosize = bufsize = MIN(copysize, 128 * 1024);
 	offset = 0;
 
 	if (kmem_alloc(kernel_map, (vm_offset_t *)&bufp, bufsize)) {

@@ -1,23 +1,31 @@
 /*
  * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
  * 
- * The contents of this file constitute Original Code as defined in and
- * are subject to the Apple Public Source License Version 1.1 (the
- * "License").  You may not use this file except in compliance with the
- * License.  Please obtain a copy of the License at
- * http://www.apple.com/publicsource and read it before using this file.
- * 
- * This Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
+ * This file contains Original Code and/or Modifications of Original Code 
+ * as defined in and that are subject to the Apple Public Source License 
+ * Version 2.0 (the 'License'). You may not use this file except in 
+ * compliance with the License.  The rights granted to you under the 
+ * License may not be used to create, or enable the creation or 
+ * redistribution of, unlawful or unlicensed copies of an Apple operating 
+ * system, or to circumvent, violate, or enable the circumvention or 
+ * violation of, any terms of an Apple operating system software license 
+ * agreement.
+ *
+ * Please obtain a copy of the License at 
+ * http://www.opensource.apple.com/apsl/ and read it before using this 
+ * file.
+ *
+ * The Original Code and all software distributed under the License are 
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
+ * Please see the License for the specific language governing rights and 
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
  */
 /* Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved */
 /*
@@ -1055,7 +1063,7 @@ __private_extern__ void uio_calculateresid( uio_t a_uio )
 		return;
 	}
 
-	a_uio->uio_iovcnt = 0;
+	a_uio->uio_iovcnt = a_uio->uio_max_iovs;
 	if (UIO_IS_64_BIT_SPACE(a_uio)) {
 #if 1 // LP64todo - remove this temp workaround once we go live with uio KPI
 		a_uio->uio_resid = 0;
@@ -1064,7 +1072,6 @@ __private_extern__ void uio_calculateresid( uio_t a_uio )
 #endif
 		for ( i = 0; i < a_uio->uio_max_iovs; i++ ) {
 			if (a_uio->uio_iovs.uiovp[i].iov_len != 0 && a_uio->uio_iovs.uiovp[i].iov_base != 0) {
-				a_uio->uio_iovcnt++;
 #if 1 // LP64todo - remove this temp workaround once we go live with uio KPI
 				a_uio->uio_resid += a_uio->uio_iovs.uiovp[i].iov_len;
 #else
@@ -1072,16 +1079,32 @@ __private_extern__ void uio_calculateresid( uio_t a_uio )
 #endif
 			}
 		}
+
+		/* position to first non zero length iovec (4235922) */
+		while (a_uio->uio_iovcnt > 0 && a_uio->uio_iovs.uiovp->iov_len == 0) {
+			a_uio->uio_iovcnt--;
+			if (a_uio->uio_iovcnt > 0) {
+				a_uio->uio_iovs.uiovp++;
+			}
+		}
 	}
 	else {
 		a_uio->uio_resid = 0;
 		for ( i = 0; i < a_uio->uio_max_iovs; i++ ) {
 			if (a_uio->uio_iovs.kiovp[i].iov_len != 0 && a_uio->uio_iovs.kiovp[i].iov_base != 0) {
-				a_uio->uio_iovcnt++;
 				a_uio->uio_resid += a_uio->uio_iovs.kiovp[i].iov_len;
 			}
 		}
+
+		/* position to first non zero length iovec (4235922) */
+		while (a_uio->uio_iovcnt > 0 && a_uio->uio_iovs.kiovp->iov_len == 0) {
+			a_uio->uio_iovcnt--;
+			if (a_uio->uio_iovcnt > 0) {
+				a_uio->uio_iovs.kiovp++;
+			}
+		}
 	}
+
 	return;
 }
 

@@ -1,23 +1,31 @@
 /*
  * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
  * 
- * The contents of this file constitute Original Code as defined in and
- * are subject to the Apple Public Source License Version 1.1 (the
- * "License").  You may not use this file except in compliance with the
- * License.  Please obtain a copy of the License at
- * http://www.apple.com/publicsource and read it before using this file.
- * 
- * This Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
+ * This file contains Original Code and/or Modifications of Original Code 
+ * as defined in and that are subject to the Apple Public Source License 
+ * Version 2.0 (the 'License'). You may not use this file except in 
+ * compliance with the License.  The rights granted to you under the 
+ * License may not be used to create, or enable the creation or 
+ * redistribution of, unlawful or unlicensed copies of an Apple operating 
+ * system, or to circumvent, violate, or enable the circumvention or 
+ * violation of, any terms of an Apple operating system software license 
+ * agreement.
+ *
+ * Please obtain a copy of the License at 
+ * http://www.opensource.apple.com/apsl/ and read it before using this 
+ * file.
+ *
+ * The Original Code and all software distributed under the License are 
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
+ * Please see the License for the specific language governing rights and 
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
  */
 /*
  * Copyright (c) 1982, 1986, 1988, 1990, 1993
@@ -476,6 +484,11 @@ loopit:
 				
 				lck_mtx_unlock(ip_mutex);
 				ipf_ref();
+				
+				/* 4135317 - always pass network byte order to filter */
+				HTONS(ip->ip_len);
+				HTONS(ip->ip_off);
+				
 				TAILQ_FOREACH(filter, &ipv4_filters, ipf_link) {
 					if (seen == 0) {
 						if ((struct ipfilter *)inject_filter_ref == filter)
@@ -494,6 +507,11 @@ loopit:
 						}
 					}
 				}
+				
+				/* set back to host byte order */
+				NTOHS(ip->ip_len);
+				NTOHS(ip->ip_off);
+				
 				lck_mtx_lock(ip_mutex);
 				ipf_unref();
 				didfilter = 1;
@@ -607,6 +625,11 @@ injectit:
 		
 		lck_mtx_unlock(ip_mutex);
 		ipf_ref();
+		
+		/* 4135317 - always pass network byte order to filter */
+		HTONS(ip->ip_len);
+		HTONS(ip->ip_off);
+		
 		TAILQ_FOREACH(filter, &ipv4_filters, ipf_link) {
 			if (seen == 0) {
 				if ((struct ipfilter *)inject_filter_ref == filter)
@@ -625,6 +648,11 @@ injectit:
 				}
 			}
 		}
+		
+		/* set back to host byte order */
+		NTOHS(ip->ip_len);
+		NTOHS(ip->ip_off);
+		
 		ipf_unref();
 		lck_mtx_lock(ip_mutex);
 	}
@@ -802,6 +830,11 @@ injectit:
 		
 		lck_mtx_unlock(ip_mutex);
 		ipf_ref();
+		
+		/* 4135317 - always pass network byte order to filter */
+		HTONS(ip->ip_len);
+		HTONS(ip->ip_off);
+		
 		TAILQ_FOREACH(filter, &ipv4_filters, ipf_link) {
 			if (filter->ipf_filter.ipf_output) {
 				errno_t result;
@@ -817,6 +850,11 @@ injectit:
 				}
 			}
 		}
+		
+		/* set back to host byte order */
+		NTOHS(ip->ip_len);
+		NTOHS(ip->ip_off);
+		
 		ipf_unref();
 		lck_mtx_lock(ip_mutex);
 	}
@@ -1383,8 +1421,8 @@ in_delayed_cksum_offset(struct mbuf *m, int ip_offset)
 	}
 	
 	if (ip_offset + sizeof(struct ip) > m->m_len) {
-		printf("delayed m_pullup, m->len: %d  off: %d  p: %d\n",
-			m->m_len, ip_offset, ip->ip_p);
+		printf("delayed m_pullup, m->len: %d  off: %d\n",
+			m->m_len, ip_offset);
 		/*
 		 * XXX
 		 * this shouldn't happen

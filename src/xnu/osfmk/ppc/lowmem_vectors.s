@@ -1,23 +1,31 @@
 /*
  * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
  * 
- * The contents of this file constitute Original Code as defined in and
- * are subject to the Apple Public Source License Version 1.1 (the
- * "License").  You may not use this file except in compliance with the
- * License.  Please obtain a copy of the License at
- * http://www.apple.com/publicsource and read it before using this file.
- * 
- * This Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
+ * This file contains Original Code and/or Modifications of Original Code 
+ * as defined in and that are subject to the Apple Public Source License 
+ * Version 2.0 (the 'License'). You may not use this file except in 
+ * compliance with the License.  The rights granted to you under the 
+ * License may not be used to create, or enable the creation or 
+ * redistribution of, unlawful or unlicensed copies of an Apple operating 
+ * system, or to circumvent, violate, or enable the circumvention or 
+ * violation of, any terms of an Apple operating system software license 
+ * agreement.
+ *
+ * Please obtain a copy of the License at 
+ * http://www.opensource.apple.com/apsl/ and read it before using this 
+ * file.
+ *
+ * The Original Code and all software distributed under the License are 
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
+ * Please see the License for the specific language governing rights and 
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
  */
 /*
  * @OSF_COPYRIGHT@
@@ -130,7 +138,7 @@ rxCont:		mtcr	r11
 			li		r11,RESET_HANDLER_IGNORE		; Get set to ignore
 			stw		r11,lo16(EXT(ResetHandler)-EXT(ExceptionVectorsStart)+RESETHANDLER_TYPE)(br0)	; Start ignoring these
 			mfsprg	r13,1							/* Get the exception save area */
-			li		r11,T_RESET						/* Set 'rupt code */
+			li		r11,T_RESET						/* Set interrupt code */
 			b		.L_exception_entry				/* Join common... */
 
 /*
@@ -223,7 +231,7 @@ notDCache:	mtcrf	255,r13							; Restore CRs
 .L_handler300:
 			mtsprg	2,r13							/* Save R13 */
 			mtsprg	3,r11							/* Save R11 */
-			li		r11,T_DATA_ACCESS				/* Set 'rupt code */
+			li		r11,T_DATA_ACCESS				/* Set interrupt code */
 			b		.L_exception_entry				/* Join common... */
 
 
@@ -279,7 +287,7 @@ notDCache:	mtcrf	255,r13							; Restore CRs
 .L_handler600:
 			mtsprg	2,r13							/* Save R13 */
 			mtsprg	3,r11							/* Save R11 */
-			li		r11,T_ALIGNMENT|T_FAM			/* Set 'rupt code */
+			li		r11,T_ALIGNMENT|T_FAM			/* Set interrupt code */
 			b		.L_exception_entry				/* Join common... */
 
 /*
@@ -303,7 +311,7 @@ notDCache:	mtcrf	255,r13							; Restore CRs
 			mtcrf	255,r11							; (BRINGUP)
 #endif
 		
-			li		r11,T_PROGRAM|T_FAM				/* Set 'rupt code */
+			li		r11,T_PROGRAM|T_FAM				/* Set interrupt code */
 			b		.L_exception_entry				/* Join common... */
 
 /*
@@ -314,7 +322,7 @@ notDCache:	mtcrf	255,r13							; Restore CRs
 .L_handler800:
 			mtsprg	2,r13							/* Save R13 */
 			mtsprg	3,r11							/* Save R11 */
-			li		r11,T_FP_UNAVAILABLE			/* Set 'rupt code */
+			li		r11,T_FP_UNAVAILABLE			/* Set interrupt code */
 			b		.L_exception_entry				/* Join common... */
 
 
@@ -326,7 +334,7 @@ notDCache:	mtcrf	255,r13							; Restore CRs
 .L_handler900:
 			mtsprg	2,r13							/* Save R13 */
 			mtsprg	3,r11							/* Save R11 */
-			li		r11,T_DECREMENTER				/* Set 'rupt code */
+			li		r11,T_DECREMENTER				/* Set interrupt code */
 			b		.L_exception_entry				/* Join common... */
 
 /*
@@ -337,7 +345,7 @@ notDCache:	mtcrf	255,r13							; Restore CRs
 .L_handlerA00:
 			mtsprg	2,r13							/* Save R13 */
 			mtsprg	3,r11							/* Save R11 */
-			li		r11,T_IO_ERROR					/* Set 'rupt code */
+			li		r11,T_IO_ERROR					/* Set interrupt code */
 			b		.L_exception_entry				/* Join common... */
 
 /*
@@ -348,7 +356,7 @@ notDCache:	mtcrf	255,r13							; Restore CRs
 .L_handlerB00:
 			mtsprg	2,r13							/* Save R13 */
 			mtsprg	3,r11							/* Save R11 */
-			li		r11,T_RESERVED					/* Set 'rupt code */
+			li		r11,T_RESERVED					/* Set interrupt code */
 			b		.L_exception_entry				/* Join common... */
 
 
@@ -385,7 +393,7 @@ notDCache:	mtcrf	255,r13							; Restore CRs
             rlwinm  r11,r11,0,0,30                  ; clear out bit 31
             rlwimi  r11,r13,1,0x40                  ; move 0x6004 bit into position
             lhz     r11,lo16(scTable)(r11)          ; get branch address from sc table
-            mfctr   r13                             ; save caller's ctr in r13
+            mfctr   r13                             ; save callers ctr in r13
             mtctr   r11                             ; set up branch to syscall handler
             mfsprg  r11,0                           ; get per_proc, which most UFTs use
             bctr                                    ; dispatch (r11 in sprg3, r13 in sprg2, ctr in r13, per_proc in r11)
@@ -480,7 +488,7 @@ sbxx64c:	ld		r1,tempr0(r11)					; Restore work register
 .L_handlerE00:
 			mtsprg	2,r13							/* Save R13 */
 			mtsprg	3,r11							/* Save R11 */
-			li		r11,T_FP_ASSIST					/* Set 'rupt code */
+			li		r11,T_FP_ASSIST					/* Set interrupt code */
 			b		.L_exception_entry				/* Join common... */
 
 
@@ -492,7 +500,7 @@ sbxx64c:	ld		r1,tempr0(r11)					; Restore work register
 PMIhandler:
 			mtsprg	2,r13							/* Save R13 */
 			mtsprg	3,r11							/* Save R11 */
-			li		r11,T_PERF_MON					/* Set 'rupt code */
+			li		r11,T_PERF_MON					/* Set interrupt code */
 			b		.L_exception_entry				/* Join common... */
 	
 
@@ -504,7 +512,7 @@ PMIhandler:
 VMXhandler:
 			mtsprg	2,r13							/* Save R13 */
 			mtsprg	3,r11							/* Save R11 */
-			li		r11,T_VMX						/* Set 'rupt code */
+			li		r11,T_VMX						/* Set interrupt code */
 			b		.L_exception_entry				/* Join common... */
 
 	
@@ -555,7 +563,7 @@ VMXhandler:
 .L_handler1300:
 			mtsprg	2,r13							/* Save R13 */
 			mtsprg	3,r11							/* Save R11 */
-			li		r11,T_INSTRUCTION_BKPT			/* Set 'rupt code */
+			li		r11,T_INSTRUCTION_BKPT			/* Set interrupt code */
 			b		.L_exception_entry				/* Join common... */
 
 /*
@@ -566,7 +574,7 @@ VMXhandler:
 .L_handler1400:
 			mtsprg	2,r13							/* Save R13 */
 			mtsprg	3,r11							/* Save R11 */
-			li		r11,T_SYSTEM_MANAGEMENT			/* Set 'rupt code */
+			li		r11,T_SYSTEM_MANAGEMENT			/* Set interrupt code */
 			b		.L_exception_entry				/* Join common... */
 
 
@@ -578,7 +586,7 @@ VMXhandler:
 .L_handler1500:
 			mtsprg	2,r13							/* Save R13 */
 			mtsprg	3,r11							/* Save R11 */
-			li		r11,T_SOFT_PATCH				/* Set 'rupt code */
+			li		r11,T_SOFT_PATCH				/* Set interrupt code */
 			b		.L_exception_entry				/* Join common... */
 
 ;
@@ -589,7 +597,7 @@ VMXhandler:
 .L_handler1600:
 			mtsprg	2,r13							/* Save R13 */
 			mtsprg	3,r11							/* Save R11 */
-			li		r11,T_ALTIVEC_ASSIST			/* Set 'rupt code */
+			li		r11,T_ALTIVEC_ASSIST			/* Set interrupt code */
 			b		.L_exception_entry				/* Join common... */
 
 ;
@@ -600,7 +608,7 @@ VMXhandler:
 .L_handler1700:
 			mtsprg	2,r13							/* Save R13 */
 			mtsprg	3,r11							/* Save R11 */
-			li		r11,T_THERMAL					/* Set 'rupt code */
+			li		r11,T_THERMAL					/* Set interrupt code */
 			b		.L_exception_entry				/* Join common... */
 
 ;
@@ -611,7 +619,7 @@ VMXhandler:
 .L_handler1800:
 			mtsprg	2,r13							/* Save R13 */
 			mtsprg	3,r11							/* Save R11 */
-			li		r11,T_ARCHDEP0					/* Set 'rupt code */
+			li		r11,T_ARCHDEP0					/* Set interrupt code */
 			b		.L_exception_entry				/* Join common... */
 
 /*
@@ -626,7 +634,7 @@ VMXhandler:
 .L_handler2000:
 			mtsprg	2,r13							/* Save R13 */
 			mtsprg	3,r11							/* Save R11 */
-			li		r11,T_INSTRUMENTATION			/* Set 'rupt code */
+			li		r11,T_INSTRUMENTATION			/* Set interrupt code */
 			b		.L_exception_entry				/* Join common... */
 
 
@@ -845,17 +853,17 @@ scTable:                                            ; ABCD E
  * except the following:
  *
  *        r11 = per_proc ptr (ie, sprg0)
- *        r13 = holds caller's ctr register
- *      sprg2 = holds caller's r13
- *      sprg3 = holds caller's r11
+ *        r13 = holds callers ctr register
+ *      sprg2 = holds callers r13
+ *      sprg3 = holds callers r11
  */
 
 ;           Handle "vmm_dispatch" (0x6004), of which only some selectors are UFTs.
 
 uftVMM:
-            mtctr   r13                             ; restore caller's ctr
+            mtctr   r13                             ; restore callers ctr
             lwz     r11,spcFlags(r11)               ; get the special flags word from per_proc
-            mfcr    r13                             ; save caller's entire cr (we use all fields below)
+            mfcr    r13                             ; save callers entire cr (we use all fields below)
 			rlwinm	r11,r11,16,16,31				; Extract spcFlags upper bits
 			andi.	r11,r11,hi16(runningVM|FamVMena|FamVMmode)
 			cmpwi	cr0,r11,hi16(runningVM|FamVMena|FamVMmode)	; Test in VM FAM
@@ -871,9 +879,9 @@ uftVMM:
 
 uftIsPreemptiveTask:
 uftIsPreemptiveTaskEnv:
-            mtctr   r13                             ; restore caller's ctr
+            mtctr   r13                             ; restore callers ctr
             lwz     r11,spcFlags(r11)               ; get the special flags word from per_proc
-            mfcr    r13,0x80                        ; save caller's cr0 so we can use it
+            mfcr    r13,0x80                        ; save callers cr0 so we can use it
             andi.	r11,r11,bbNoMachSC|bbPreemptive	; Clear what we do not need
 			cmplwi	r11,bbNoMachSC					; See if we are trapping syscalls
 			blt--	uftNormal80                     ; No...
@@ -892,7 +900,7 @@ uftThreadInfo:
             lwz     r3,UAW+4(r11)                   ; get user assist word, assuming a 32-bit processor
 LEXT(uft_uaw_nop_if_32bit)
             ld      r3,UAW(r11)                     ; get the whole doubleword if 64-bit (patched to nop if 32-bit)
-            mtctr   r13                             ; restore caller's ctr
+            mtctr   r13                             ; restore callers ctr
             b       uftRFI                          ; done
 
 
@@ -900,16 +908,16 @@ LEXT(uft_uaw_nop_if_32bit)
 
 uftFacilityStatus:
             lwz     r3,spcFlags(r11)                ; get "special flags" word from per_proc
-            mtctr   r13                             ; restore caller's ctr
+            mtctr   r13                             ; restore callers ctr
             b       uftRFI                          ; done
 
 
 ;           Handle "Load MSR" UFT (0x7FF4).  This is not used on 64-bit processors, though it would work.
 
 uftLoadMSR:
-            mfsrr1  r11                             ; get caller's MSR
-            mtctr   r13                             ; restore caller's ctr
-            mfcr    r13,0x80                        ; save caller's cr0 so we can test PR
+            mfsrr1  r11                             ; get callers MSR
+            mtctr   r13                             ; restore callers ctr
+            mfcr    r13,0x80                        ; save callers cr0 so we can test PR
             rlwinm. r11,r11,0,MSR_PR_BIT,MSR_PR_BIT ; really in the kernel?
             bne-    uftNormal80                     ; do not permit from user mode
             mfsprg  r11,0                           ; restore per_proc
@@ -923,7 +931,7 @@ uftLoadMSR:
 ;               sprg3 = callers r11
 
 uftRestoreThenRFI:                                  ; WARNING: can drop down to here
-            mtcrf   0x80,r13                        ; restore caller's cr0
+            mtcrf   0x80,r13                        ; restore callers cr0
 uftRFI:
             .globl  EXT(uft_nop_if_32bit)
 LEXT(uft_nop_if_32bit)
@@ -1031,7 +1039,7 @@ ctgte32tb:	mftbu	r21								; Get the upper time now
 
 			lhz		r24,PP_CPU_NUMBER(r11)			; Get the logical processor number
 			li		r23,T_SYSTEM_CALL				; Get the system call id
-			mtctr	r13								; Restore the caller's CTR
+			mtctr	r13								; Restore the callers CTR
 			sth		r24,LTR_cpu(r20)				; Save processor number
 			li		r24,64							; Offset to third line
 			sth		r23,LTR_excpt(r20)				; Set the exception code
@@ -1081,7 +1089,7 @@ ctdisa32:	mtcrf	0x80,r25						; Restore the used condition register field
 			lwz		r20,tempr0(r11)					; Restore work register
 			lwz		r21,tempr1(r11)					; Restore work register
 			lwz		r25,tempr2(r11)					; Restore work register
-			mtctr	r13								; Restore the caller's CTR
+			mtctr	r13								; Restore the callers CTR
 			lwz		r22,tempr3(r11)					; Restore work register
 			lwz		r23,tempr4(r11)					; Restore work register
 			lwz		r24,tempr5(r11)					; Restore work register
@@ -1091,7 +1099,7 @@ ctbail32:	mtcrf	0x80,r25						; Restore the used condition register field
 			lwz		r20,tempr0(r11)					; Restore work register
 			lwz		r21,tempr1(r11)					; Restore work register
 			lwz		r25,tempr2(r11)					; Restore work register
-			mtctr	r13								; Restore the caller's CTR
+			mtctr	r13								; Restore the callers CTR
 			lwz		r22,tempr3(r11)					; Restore work register
 			lwz		r23,tempr4(r11)					; Restore work register
 			b		uftNormalSyscall				; Go pass it on along...
@@ -1199,7 +1207,7 @@ ctdisa64:	mtcrf	0x80,r25						; Restore the used condition register field
 			ld		r20,tempr0(r11)					; Restore work register
 			ld		r21,tempr1(r11)					; Restore work register
 			ld		r25,tempr2(r11)					; Restore work register
-			mtctr	r13								; Restore the caller's CTR
+			mtctr	r13								; Restore the callers CTR
 			ld		r22,tempr3(r11)					; Restore work register
 			ld		r23,tempr4(r11)					; Restore work register
 			ld		r24,tempr5(r11)					; Restore work register
@@ -1209,7 +1217,7 @@ ctbail64:	mtcrf	0x80,r25						; Restore the used condition register field
 			ld		r20,tempr0(r11)					; Restore work register
 			ld		r21,tempr1(r11)					; Restore work register
 			ld		r25,tempr2(r11)					; Restore work register
-			mtctr	r13								; Restore the caller's CTR
+			mtctr	r13								; Restore the callers CTR
 			ld		r22,tempr3(r11)					; Restore work register
 			ld		r23,tempr4(r11)					; Restore work register
 			li		r11,T_SYSTEM_CALL|T_FAM			; Set system code call
@@ -1241,8 +1249,8 @@ uftNormalSyscall1:
  * set up:
  *
  * ENTRY:	interrupts off, VM off, in 64-bit mode if supported
- *          Caller's r13 saved in sprg2.
- *          Caller's r11 saved in sprg3.
+ *          Callers r13 saved in sprg2.
+ *          Callers r11 saved in sprg3.
  *          Exception code (ie, T_SYSTEM_CALL etc) in r11.
  *          All other registers are live.
  *
@@ -1253,9 +1261,9 @@ uftNormalSyscall1:
 /*
  *
  *	Here we will save off a mess of registers, the special ones and R0-R12.  We use the DCBZ
- *	instruction to clear and allcoate a line in the cache.  This way we won't take any cache
- *	misses, so these stores won't take all that long. Except the first line that is because
- *	we can't do a DCBZ if the L1 D-cache is off.  The rest we will skip if they are
+ *	instruction to clear and allcoate a line in the cache.  This way we will not take any cache
+ *	misses, so these stores will not take all that long. Except the first line that is because
+ *	we can not do a DCBZ if the L1 D-cache is off.  The rest we will skip if they are
  *	off also.
  *
  *	Note that if we are attempting to sleep (as opposed to nap or doze) all interruptions
@@ -1548,7 +1556,7 @@ noPerfMonSave32:
 			lwz		r25,traceMask(0)				; Get the trace mask
 			li		r0,SAVgeneral					; Get the savearea type value
 			lhz		r19,PP_CPU_NUMBER(r2)			; Get the logical processor number											
-			rlwinm	r22,r11,30,0,31					; Divide interrupt code by 2
+			rlwinm	r22,r11,30,0,31					; Divide interrupt code by 4
 			stb		r0,SAVflags+2(r13)				; Mark valid context
 			addi	r22,r22,10						; Adjust code so we shift into CR5
 			li		r23,trcWork						; Get the trace work area address
@@ -2970,9 +2978,9 @@ ueMck:		li		r0,0							; Set the unrecovered flag before passing up
 			
 
 /*
- *			Here's where we come back from some instruction emulator.  If we come back with
+ *			Here is where we come back from some instruction emulator.  If we come back with
  *			T_IN_VAIN, the emulation is done and we should just reload state and directly
- *			go back to the interrupted code. Otherwise, we'll check to see if
+ *			go back to the interrupted code. Otherwise, we will check to see if
  *			we need to redrive with a different interrupt, i.e., DSI.
  *			Note that this we are actually not redriving the rupt, rather changing it
  *			into a different one.  Thus we clear the redrive bit.
@@ -3959,7 +3967,12 @@ EXT(killresv):
 			.long	0								; 5470 reserved			
 			.long	0								; 5474 reserved			
 			.long	0								; 5478 reserved			
-			.long	0								; 547C reserved	
+			.long	0								; 547C reserved
+			.long	EXT(kmod)							; 5480 Pointer to kmod, debugging aid
+			.long	EXT(kdp_trans_off)						; 5484 Pointer to kdp_trans_off, debugging aid
+			.long	EXT(kdp_read_io)						; 5488 Pointer to kdp_read_io, debugging aid
+			.long	0								; 548C Reserved for developer use
+			.long	0								; 5490 Reserved for developer use
 ;
 ;	The "shared page" is used for low-level debugging
 ;

@@ -1,23 +1,31 @@
 /*
  * Copyright (c) 2000-2002 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
  * 
- * The contents of this file constitute Original Code as defined in and
- * are subject to the Apple Public Source License Version 1.1 (the
- * "License").  You may not use this file except in compliance with the
- * License.  Please obtain a copy of the License at
- * http://www.apple.com/publicsource and read it before using this file.
- * 
- * This Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
+ * This file contains Original Code and/or Modifications of Original Code 
+ * as defined in and that are subject to the Apple Public Source License 
+ * Version 2.0 (the 'License'). You may not use this file except in 
+ * compliance with the License.  The rights granted to you under the 
+ * License may not be used to create, or enable the creation or 
+ * redistribution of, unlawful or unlicensed copies of an Apple operating 
+ * system, or to circumvent, violate, or enable the circumvention or 
+ * violation of, any terms of an Apple operating system software license 
+ * agreement.
+ *
+ * Please obtain a copy of the License at 
+ * http://www.opensource.apple.com/apsl/ and read it before using this 
+ * file.
+ *
+ * The Original Code and all software distributed under the License are 
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
+ * Please see the License for the specific language governing rights and 
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
  */
  
  /*
@@ -27,7 +35,7 @@
 #include <sys/param.h>
 #include <sys/utfconv.h>
 #include <sys/errno.h>
-#include <architecture/byte_order.h>
+#include <libkern/OSByteOrder.h>
 
 /*
  * UTF-8 (Unicode Transformation Format)
@@ -117,10 +125,31 @@ unicode_decomposeable(u_int16_t character) {
     	return (0);
 }
 
+
+/*
+ * Get the combing class.
+ *
+ * Similar to CFUniCharGetCombiningPropertyForCharacter.
+ */
+static inline u_int8_t
+get_combining_class(u_int16_t character) {
+	const u_int8_t *bitmap = __CFUniCharCombiningPropertyBitmap;
+
+	u_int8_t value = bitmap[(character >> 8)];
+
+	if (value) {
+		bitmap = bitmap + (value * 256);
+		return bitmap[character % 256];
+	}
+	return (0);
+}
+
+
 static int unicode_decompose(u_int16_t character, u_int16_t *convertedChars);
 
 static u_int16_t unicode_combine(u_int16_t base, u_int16_t combining);
 
+static void priortysort(u_int16_t* characters, int count);
 
 char utf_extrabytes[32] = {
 	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
@@ -154,7 +183,7 @@ utf8_encodelen(const u_int16_t * ucsp, size_t ucslen, u_int16_t altslash,
 		ucs_ch = *ucsp++;
 
 		if (swapbytes)
-			ucs_ch = NXSwapShort(ucs_ch);
+			ucs_ch = OSSwapInt16(ucs_ch);
 		if (ucs_ch == '/')
 			ucs_ch = altslash ? altslash : '_';
 		else if (ucs_ch == '\0')
@@ -211,7 +240,7 @@ utf8_encodestr(const u_int16_t * ucsp, size_t ucslen, u_int8_t * utf8p,
 			--extra;
 			ucs_ch = *chp++;
 		} else {
-			ucs_ch = swapbytes ? NXSwapShort(*ucsp++) : *ucsp++;
+			ucs_ch = swapbytes ? OSSwapInt16(*ucsp++) : *ucsp++;
 
 			if (decompose && unicode_decomposeable(ucs_ch)) {
 				extra = unicode_decompose(ucs_ch, sequence) - 1;
@@ -255,7 +284,7 @@ utf8_encodestr(const u_int16_t * ucsp, size_t ucslen, u_int8_t * utf8p,
 				u_int16_t ch2;
 				u_int32_t pair;
 
-				ch2 = swapbytes ? NXSwapShort(*ucsp) : *ucsp;
+				ch2 = swapbytes ? OSSwapInt16(*ucsp) : *ucsp;
 				if (ch2 >= SP_LOW_FIRST && ch2 <= SP_LOW_LAST) {
 					pair = ((ucs_ch - SP_HIGH_FIRST) << SP_HALF_SHIFT)
 						+ (ch2 - SP_LOW_FIRST) + SP_HALF_BASE;
@@ -316,6 +345,7 @@ utf8_decodestr(const u_int8_t* utf8p, size_t utf8len, u_int16_t* ucsp,
 	u_int16_t* bufend;
 	unsigned int ucs_ch;
 	unsigned int byte;
+	int combcharcnt = 0;
 	int result = 0;
 	int decompose, precompose, swapbytes;
 
@@ -392,13 +422,13 @@ utf8_decodestr(const u_int8_t* utf8p, size_t utf8len, u_int16_t* ucsp,
 				ucs_ch = (ch >> SP_HALF_SHIFT) + SP_HIGH_FIRST;
 				if (ucs_ch < SP_HIGH_FIRST || ucs_ch > SP_HIGH_LAST)
 					goto invalid;
-				*ucsp++ = swapbytes ? NXSwapShort(ucs_ch) : ucs_ch;
+				*ucsp++ = swapbytes ? OSSwapInt16(ucs_ch) : ucs_ch;
 				if (ucsp >= bufend)
 					goto toolong;
 				ucs_ch = (ch & SP_HALF_MASK) + SP_LOW_FIRST;
 				if (ucs_ch < SP_LOW_FIRST || ucs_ch > SP_LOW_LAST)
 					goto invalid;
-				*ucsp++ = swapbytes ? NXSwapShort(ucs_ch) : ucs_ch;
+				*ucsp++ = swapbytes ? OSSwapInt16(ucs_ch) : ucs_ch;
 			        continue;
 			default:
 				goto invalid;
@@ -412,17 +442,18 @@ utf8_decodestr(const u_int8_t* utf8p, size_t utf8len, u_int16_t* ucsp,
 
 					for (i = 0; i < count; ++i) {
 						ucs_ch = sequence[i];
-						*ucsp++ = swapbytes ? NXSwapShort(ucs_ch) : ucs_ch;
+						*ucsp++ = swapbytes ? OSSwapInt16(ucs_ch) : ucs_ch;
 						if (ucsp >= bufend)
 							goto toolong;
 					}
+					combcharcnt += count - 1;
 					continue;			
 				}
 			} else if (precompose && (ucsp != bufstart)) {
 				u_int16_t composite, base;
 
 				if (unicode_combinable(ucs_ch)) {
-					base = swapbytes ? NXSwapShort(*(ucsp - 1)) : *(ucsp - 1);
+					base = swapbytes ? OSSwapInt16(*(ucsp - 1)) : *(ucsp - 1);
 					composite = unicode_combine(base, ucs_ch);
 					if (composite) {
 						--ucsp;
@@ -436,7 +467,24 @@ utf8_decodestr(const u_int8_t* utf8p, size_t utf8len, u_int16_t* ucsp,
 		if (ucs_ch == altslash)
 			ucs_ch = '/';
 
-		*ucsp++ = swapbytes ? NXSwapShort(ucs_ch) : ucs_ch;
+		/*
+		 * Make multiple combining character sequences canonical
+		 */
+		if (unicode_combinable(ucs_ch)) {
+			++combcharcnt;   /* start tracking a run */
+		} else if (combcharcnt) {
+			if (combcharcnt > 1) {
+				priortysort(ucsp - combcharcnt, combcharcnt);
+			}
+			combcharcnt = 0;  /* start over */
+		}
+		*ucsp++ = swapbytes ? OSSwapInt16(ucs_ch) : ucs_ch;
+	}
+	/*
+	 * Make a previous combining sequence canonical
+	 */
+	if (combcharcnt > 1) {
+		priortysort(ucsp - combcharcnt, combcharcnt);
 	}
 
 exit:
@@ -729,3 +777,39 @@ unicode_combine(u_int16_t base, u_int16_t combining)
 	return (value);
 }
 
+
+/*
+ * priortysort - order combining chars into canonical order
+ *
+ * Similar to CFUniCharPrioritySort
+ */
+static void
+priortysort(u_int16_t* characters, int count)
+{
+	u_int32_t p1, p2;
+	u_int16_t *ch1, *ch2;
+	u_int16_t *end;
+	int changes = 1;
+
+	end = characters + count;
+	do {
+		changes = 0;
+		ch1 = characters;
+		ch2 = characters + 1;
+		p2 = get_combining_class(*ch1);
+		while (ch2 < end) {
+			p1 = p2;
+			p2 = get_combining_class(*ch2);
+			if (p1 > p2) {
+				u_int32_t tmp;
+
+				tmp = *ch1;
+				*ch1 = *ch2;
+				*ch2 = tmp;
+				changes = 1;
+			}
+			++ch1;
+			++ch2;
+		}
+	} while (changes);
+}

@@ -1,23 +1,31 @@
 /*
- * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
  * 
- * The contents of this file constitute Original Code as defined in and
- * are subject to the Apple Public Source License Version 1.1 (the
- * "License").  You may not use this file except in compliance with the
- * License.  Please obtain a copy of the License at
- * http://www.apple.com/publicsource and read it before using this file.
- * 
- * This Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
+ * This file contains Original Code and/or Modifications of Original Code 
+ * as defined in and that are subject to the Apple Public Source License 
+ * Version 2.0 (the 'License'). You may not use this file except in 
+ * compliance with the License.  The rights granted to you under the 
+ * License may not be used to create, or enable the creation or 
+ * redistribution of, unlawful or unlicensed copies of an Apple operating 
+ * system, or to circumvent, violate, or enable the circumvention or 
+ * violation of, any terms of an Apple operating system software license 
+ * agreement.
+ *
+ * Please obtain a copy of the License at 
+ * http://www.opensource.apple.com/apsl/ and read it before using this 
+ * file.
+ *
+ * The Original Code and all software distributed under the License are 
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
+ * Please see the License for the specific language governing rights and 
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
  */
 /*
  * @OSF_COPYRIGHT@
@@ -81,6 +89,7 @@
 #include <kern/xpr.h>
 #include <kern/zalloc.h>
 #include <kern/locks.h>
+#include <console/serial_protos.h>
 #include <vm/vm_shared_memory_server.h>
 #include <vm/vm_kern.h>
 #include <vm/vm_init.h>
@@ -95,7 +104,6 @@
 #ifdef __ppc__
 #include <ppc/Firmware.h>
 #include <ppc/mappings.h>
-#include <ppc/serial_io.h>
 #endif
 
 static void		kernel_bootstrap_thread(void);
@@ -103,9 +111,15 @@ static void		kernel_bootstrap_thread(void);
 static void		load_context(
 					thread_t	thread);
 
+#ifdef i386
+extern void	cpu_window_init(int);
+#endif
+
+
 /*
  *	Running in virtual memory, on the interrupt stack.
  */
+
 void
 kernel_bootstrap(void)
 {
@@ -147,8 +161,8 @@ kernel_bootstrap(void)
 	 *	Create a kernel thread to execute the kernel bootstrap.
 	 */
 	result = kernel_thread_create((thread_continue_t)kernel_bootstrap_thread, NULL, MAXPRI_KERNEL, &thread);
-	if (result != KERN_SUCCESS)
-		panic("kernel_bootstrap");
+
+	if (result != KERN_SUCCESS) panic("kernel_bootstrap: result = %08X\n", result);
 
 	thread->state = TH_RUN;
 	thread_deallocate(thread);
@@ -211,10 +225,18 @@ kernel_bootstrap_thread(void)
 	
 	(void) spllo();		/* Allow interruptions */
 
-    /*
-     *	Fill in the comm area (mapped into every task address space.)
-     */
-    commpage_populate();
+	/*
+	 *	Fill in the comm area (mapped into every task address space.)
+	 */
+	commpage_populate();
+
+#ifdef i386
+	/*
+	 *	create and initialize a copy window
+	 * 	for processor 0
+	 */
+	cpu_window_init(0);
+#endif
 
 	/*
 	 *	Start the user bootstrap.
@@ -225,9 +247,7 @@ kernel_bootstrap_thread(void)
 	}
 #endif
 
-#if __ppc__
 	serial_keyboard_init();		/* Start serial keyboard if wanted */
-#endif
 
 	thread_bind(self, PROCESSOR_NULL);
 

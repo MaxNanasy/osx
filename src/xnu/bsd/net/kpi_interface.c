@@ -1,23 +1,31 @@
 /*
  * Copyright (c) 2004 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
  * 
- * The contents of this file constitute Original Code as defined in and
- * are subject to the Apple Public Source License Version 1.1 (the
- * "License").  You may not use this file except in compliance with the
- * License.  Please obtain a copy of the License at
- * http://www.apple.com/publicsource and read it before using this file.
- * 
- * This Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
+ * This file contains Original Code and/or Modifications of Original Code 
+ * as defined in and that are subject to the Apple Public Source License 
+ * Version 2.0 (the 'License'). You may not use this file except in 
+ * compliance with the License.  The rights granted to you under the 
+ * License may not be used to create, or enable the creation or 
+ * redistribution of, unlawful or unlicensed copies of an Apple operating 
+ * system, or to circumvent, violate, or enable the circumvention or 
+ * violation of, any terms of an Apple operating system software license 
+ * agreement.
+ *
+ * Please obtain a copy of the License at 
+ * http://www.opensource.apple.com/apsl/ and read it before using this 
+ * file.
+ *
+ * The Original Code and all software distributed under the License are 
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
+ * Please see the License for the specific language governing rights and 
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
  */
 
 #include "kpi_interface.h"
@@ -1024,7 +1032,10 @@ errno_t ifnet_get_multicast_list(ifnet_t interface, ifmultiaddr_t **addresses)
 	}
 	
 	MALLOC(*addresses, ifmultiaddr_t*, sizeof(ifmultiaddr_t) * (cmax + 1), M_TEMP, M_NOWAIT);
-	if (*addresses == NULL) return ENOMEM;
+	if (*addresses == NULL) {
+		if (lock) ifnet_lock_done(interface);
+		return ENOMEM;
+	}
 	
 	LIST_FOREACH(addr, &interface->if_multiaddrs, ifma_link)
 	{
@@ -1073,8 +1084,14 @@ ifnet_find_by_name(
 	ifnet_head_lock_shared();
 	TAILQ_FOREACH(ifp, &ifnet, if_link)
 	{
-		struct sockaddr_dl *ll_addr =
-			(struct sockaddr_dl *)ifnet_addrs[ifp->if_index - 1]->ifa_addr;
+		struct ifaddr *ifa = ifnet_addrs[ifp->if_index - 1];
+		struct sockaddr_dl *ll_addr;
+		
+		if (!ifa || !ifa->ifa_addr)
+			continue;
+		
+		ll_addr = (struct sockaddr_dl *)ifa->ifa_addr;
+		
 		if ((ifp->if_eflags & IFEF_DETACHING) == 0 &&
 			namelen == ll_addr->sdl_nlen &&
 			(strncmp(ll_addr->sdl_data, ifname, ll_addr->sdl_nlen) == 0))

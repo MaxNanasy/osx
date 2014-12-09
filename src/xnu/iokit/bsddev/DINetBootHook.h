@@ -8,6 +8,12 @@
  *	Revision History
  *
  *	$Log: DINetBootHook.h,v $
+ *	Revision 1.3.1582.1  2005/06/24 01:47:25  lindak
+ *	Bringing over all of the Karma changes into chardonnay.
+ *
+ *	Revision 1.1.1.1  2005/02/24 21:48:06  akosut
+ *	Import xnu-764 from Tiger8A395
+ *	
  *	Revision 1.3  2002/05/22 18:50:49  aramesh
  *	Kernel API Cleanup
  *	Bug #: 2853781

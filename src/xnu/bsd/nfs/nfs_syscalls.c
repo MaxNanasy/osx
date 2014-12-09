@@ -1,23 +1,31 @@
 /*
  * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
  * 
- * The contents of this file constitute Original Code as defined in and
- * are subject to the Apple Public Source License Version 1.1 (the
- * "License").  You may not use this file except in compliance with the
- * License.  Please obtain a copy of the License at
- * http://www.apple.com/publicsource and read it before using this file.
- * 
- * This Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
+ * This file contains Original Code and/or Modifications of Original Code 
+ * as defined in and that are subject to the Apple Public Source License 
+ * Version 2.0 (the 'License'). You may not use this file except in 
+ * compliance with the License.  The rights granted to you under the 
+ * License may not be used to create, or enable the creation or 
+ * redistribution of, unlawful or unlicensed copies of an Apple operating 
+ * system, or to circumvent, violate, or enable the circumvention or 
+ * violation of, any terms of an Apple operating system software license 
+ * agreement.
+ *
+ * Please obtain a copy of the License at 
+ * http://www.opensource.apple.com/apsl/ and read it before using this 
+ * file.
+ *
+ * The Original Code and all software distributed under the License are 
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
+ * Please see the License for the specific language governing rights and 
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
  */
 /* Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved */
 /*
@@ -220,9 +228,9 @@ getfh(proc_t p, struct getfh_args *uap, __unused int *retval)
 	}
 
 	bzero(&nfh, sizeof(nfh));
-	nfh.nfh_xh.nxh_version = NFS_FH_VERSION;
-	nfh.nfh_xh.nxh_fsid = nxfs->nxfs_id;
-	nfh.nfh_xh.nxh_expid = nx->nx_id;
+	nfh.nfh_xh.nxh_version = htonl(NFS_FH_VERSION);
+	nfh.nfh_xh.nxh_fsid = htonl(nxfs->nxfs_id);
+	nfh.nfh_xh.nxh_expid = htonl(nx->nx_id);
 	nfh.nfh_xh.nxh_flags = 0;
 	nfh.nfh_xh.nxh_reserved = 0;
 	nfh.nfh_len = NFS_MAX_FID_SIZE;
@@ -685,7 +693,7 @@ nfskerb_clientd(
 		    error = tsleep((caddr_t)&nmp->nm_authstr, PSOCK | PCATCH,
 			"nfskrbtimr", hz / 3);
 		    if (error == EINTR || error == ERESTART)
-			    dounmount(nmp->nm_mountp, 0, p);
+			    dounmount(nmp->nm_mountp, 0, NULL, p);
 	    }
 	}
 
@@ -912,12 +920,12 @@ nfssvc_nfsd(nsd, argp, p)
 				continue;
 			lck_rw_lock_exclusive(&slp->ns_rwlock);
 			if (slp->ns_flag & SLP_VALID) {
-				if (slp->ns_flag & SLP_DISCONN) {
-					nfsrv_zapsock(slp);
-				} else if (slp->ns_flag & SLP_NEEDQ) {
+				if ((slp->ns_flag & (SLP_NEEDQ|SLP_DISCONN)) == SLP_NEEDQ) {
 					slp->ns_flag &= ~SLP_NEEDQ;
 					nfsrv_rcv_locked(slp->ns_so, slp, MBUF_WAITOK);
 				}
+				if (slp->ns_flag & SLP_DISCONN)
+					nfsrv_zapsock(slp);
 				error = nfsrv_dorec(slp, nfsd, &nd);
 				microuptime(&now);
 				cur_usec = (u_quad_t)now.tv_sec * 1000000 +
@@ -1389,10 +1397,15 @@ nfsrv_zapsock(struct nfssvc_sock *slp)
 	if (so == NULL)
 		return;
 
+	/*
+	 * Attempt to deter future upcalls, but leave the
+	 * upcall info in place to avoid a race with the
+	 * networking code.
+	 */
 	socket_lock(so, 1);
-	so->so_upcall = NULL;
 	so->so_rcv.sb_flags &= ~SB_UPCALL;
 	socket_unlock(so, 1);
+
 	sock_shutdown(so, SHUT_RDWR);
 }
 
@@ -1622,7 +1635,7 @@ nfsmout:
 /*
  * cleanup and release a server socket structure.
  */
-static void
+void
 nfsrv_slpfree(struct nfssvc_sock *slp)
 {
 	struct nfsuid *nuidp, *nnuidp;
@@ -1673,6 +1686,8 @@ nfsrv_slpfree(struct nfssvc_sock *slp)
 void
 nfsrv_slpderef(struct nfssvc_sock *slp)
 {
+	struct timeval now;
+
 	lck_mtx_lock(nfsd_mutex);
 	lck_rw_lock_exclusive(&slp->ns_rwlock);
 	slp->ns_sref--;
@@ -1682,10 +1697,19 @@ nfsrv_slpderef(struct nfssvc_sock *slp)
 		return;
 	}
 
+	/* queue the socket up for deletion */
+	microuptime(&now);
+	slp->ns_timestamp = now.tv_sec;
 	TAILQ_REMOVE(&nfssvc_sockhead, slp, ns_chain);
+	TAILQ_INSERT_TAIL(&nfssvc_deadsockhead, slp, ns_chain);
+	lck_rw_done(&slp->ns_rwlock);
+	if (slp == nfs_udpsock)
+		nfs_udpsock = NULL;
+#if ISO
+	else if (slp == nfs_cltpsock)
+		nfs_cltpsock = NULL;
+#endif
 	lck_mtx_unlock(nfsd_mutex);
-
-	nfsrv_slpfree(slp);
 }
 
 
@@ -1699,8 +1723,10 @@ nfsrv_init(terminating)
 	int terminating;
 {
 	struct nfssvc_sock *slp, *nslp;
+	struct timeval now;
 
 	if (terminating) {
+		microuptime(&now);
 		for (slp = TAILQ_FIRST(&nfssvc_sockhead); slp != 0; slp = nslp) {
 			nslp = TAILQ_NEXT(slp, ns_chain);
 			if (slp->ns_flag & SLP_VALID) {
@@ -1708,10 +1734,16 @@ nfsrv_init(terminating)
 				nfsrv_zapsock(slp);
 				lck_rw_done(&slp->ns_rwlock);
 			}
+			/* queue the socket up for deletion */
+			slp->ns_timestamp = now.tv_sec;
 			TAILQ_REMOVE(&nfssvc_sockhead, slp, ns_chain);
-			/* grab the lock one final time in case anyone's using it */
-			lck_rw_lock_exclusive(&slp->ns_rwlock);
-			nfsrv_slpfree(slp);
+			TAILQ_INSERT_TAIL(&nfssvc_deadsockhead, slp, ns_chain);
+			if (slp == nfs_udpsock)
+				nfs_udpsock = NULL;
+#if ISO
+			else if (slp == nfs_cltpsock)
+				nfs_cltpsock = NULL;
+#endif
 		}
 		nfsrv_cleancache();	/* And clear out server cache */
 /* XXX Revisit when enabling WebNFS */
@@ -1722,16 +1754,19 @@ nfsrv_init(terminating)
 	}
 #endif
 
-	TAILQ_INIT(&nfssvc_sockhead);
-
-	TAILQ_INIT(&nfsd_head);
-	nfsd_head_flag &= ~NFSD_CHECKSLP;
+	if (!terminating) {
+		TAILQ_INIT(&nfssvc_sockhead);
+		TAILQ_INIT(&nfssvc_deadsockhead);
+		TAILQ_INIT(&nfsd_head);
+		nfsd_head_flag &= ~NFSD_CHECKSLP;
+	}
 
 	MALLOC(nfs_udpsock, struct nfssvc_sock *, sizeof(struct nfssvc_sock),
 			M_NFSSVC, M_WAITOK);
 	if (nfs_udpsock) {
 		bzero((caddr_t)nfs_udpsock, sizeof (struct nfssvc_sock));
 		lck_rw_init(&nfs_udpsock->ns_rwlock, nfs_slp_rwlock_group, nfs_slp_lock_attr);
+		lck_mtx_init(&nfs_udpsock->ns_wgmutex, nfs_slp_mutex_group, nfs_slp_lock_attr);
 		TAILQ_INIT(&nfs_udpsock->ns_uidlruhead);
 		TAILQ_INSERT_HEAD(&nfssvc_sockhead, nfs_udpsock, ns_chain);
 	} else {
@@ -1744,6 +1779,7 @@ nfsrv_init(terminating)
 	if (nfs_cltpsock) {
 		bzero((caddr_t)nfs_cltpsock, sizeof (struct nfssvc_sock));
 		lck_rw_init(&nfs_cltpsock->ns_rwlock, nfs_slp_rwlock_group, nfs_slp_lock_attr);
+		lck_mtx_init(&nfs_cltpsock->ns_wgmutex, nfs_slp_mutex_group, nfs_slp_lock_attr);
 		TAILQ_INIT(&nfs_cltpsock->ns_uidlruhead);
 		TAILQ_INSERT_TAIL(&nfssvc_sockhead, nfs_cltpsock, ns_chain);
 	} else {

@@ -1,23 +1,31 @@
 /*
  * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
  * 
- * The contents of this file constitute Original Code as defined in and
- * are subject to the Apple Public Source License Version 1.1 (the
- * "License").  You may not use this file except in compliance with the
- * License.  Please obtain a copy of the License at
- * http://www.apple.com/publicsource and read it before using this file.
- * 
- * This Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
+ * This file contains Original Code and/or Modifications of Original Code 
+ * as defined in and that are subject to the Apple Public Source License 
+ * Version 2.0 (the 'License'). You may not use this file except in 
+ * compliance with the License.  The rights granted to you under the 
+ * License may not be used to create, or enable the creation or 
+ * redistribution of, unlawful or unlicensed copies of an Apple operating 
+ * system, or to circumvent, violate, or enable the circumvention or 
+ * violation of, any terms of an Apple operating system software license 
+ * agreement.
+ *
+ * Please obtain a copy of the License at 
+ * http://www.opensource.apple.com/apsl/ and read it before using this 
+ * file.
+ *
+ * The Original Code and all software distributed under the License are 
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
+ * Please see the License for the specific language governing rights and 
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
  */
 /*
  * @OSF_COPYRIGHT@
@@ -124,11 +132,6 @@
 /*
  *  Routines for general lock debugging.
  */
-#define	S_TYPE		SLOCK_TYPE(%edx)
-#define	S_PC		SLOCK_PC(%edx)
-#define	S_THREAD	SLOCK_THREAD(%edx)
-#define	S_DURATIONH	SLOCK_DURATIONH(%edx)
-#define	S_DURATIONL	SLOCK_DURATIONL(%edx)
 
 /* 
  * Checks for expected lock types and calls "panic" on
@@ -143,17 +146,6 @@
 	hlt						;	\
 	.data						;	\
 2:	String	"not a mutex!"				;	\
-	.text						;	\
-1:
-
-#define	CHECK_SIMPLE_LOCK_TYPE()				\
-	cmpl	$ USLOCK_TAG,S_TYPE 			;	\
-	je	1f					;	\
-	pushl	$2f					;	\
-	call	EXT(panic)				;	\
-	hlt						;	\
-	.data						;	\
-2:	String	"not a simple lock!"			;	\
 	.text						;	\
 1:
 
@@ -261,8 +253,9 @@ LEAF_ENTRY(hw_lock_init)
 LEAF_ENTRY(hw_lock_lock)
 	movl	L_ARG0,%edx		/* fetch lock pointer */
 
-	movl	L_PC,%ecx
-1:	DISABLE_PREEMPTION
+	movl	%gs:CPU_ACTIVE_THREAD,%ecx
+	DISABLE_PREEMPTION
+1:
 	movl	0(%edx), %eax
 	testl	%eax,%eax		/* lock locked? */
 	jne	3f			/* branch if so */
@@ -270,8 +263,7 @@ LEAF_ENTRY(hw_lock_lock)
 	jne	3f
 	movl	$1,%eax			/* In case this was a timeout call */
 	LEAF_RET			/* if yes, then nothing left to do */
-
-3:	ENABLE_PREEMPTION		/* no reason we can't be preemptable */
+3:
 	PAUSE				/* pause for hyper-threading */
 	jmp	1b			/* try again */
 
@@ -284,7 +276,7 @@ LEAF_ENTRY(hw_lock_lock)
 LEAF_ENTRY(hw_lock_to)
 1:
 	movl	L_ARG0,%edx		/* fetch lock pointer */
-	movl	L_PC,%ecx
+	movl	%gs:CPU_ACTIVE_THREAD,%ecx
 	/*
 	 * Attempt to grab the lock immediately
 	 * - fastpath without timeout nonsense.
@@ -315,8 +307,6 @@ LEAF_ENTRY(hw_lock_to)
 	adcl	$0,%edx			/* add carry */
 	mov	%edx,%ecx
 	mov	%eax,%ebx		/* %ecx:%ebx is the timeout expiry */
-3:
-	ENABLE_PREEMPTION		/* no reason not to be preempted now */
 4:
 	/*
 	 * The inner-loop spin to look for the lock being freed.
@@ -337,7 +327,7 @@ LEAF_ENTRY(hw_lock_to)
 	cmpl	%ecx,%edx		/* compare high-order 32-bits */
 	jb	4b			/* continue spinning if less, or */
 	cmpl	%ebx,%eax		/* compare low-order 32-bits */ 
-	jb	5b			/* continue if less, else bail */
+	jb	4b			/* continue if less, else bail */
 	xor	%eax,%eax		/* with 0 return value */
 	pop	%ebx
 	pop	%edi
@@ -348,10 +338,9 @@ LEAF_ENTRY(hw_lock_to)
 	 * Here to try to grab the lock that now appears to be free
 	 * after contention.
 	 */
-	movl	8+L_PC,%edx		/* calling pc (8+ for pushed regs) */
-	DISABLE_PREEMPTION
+	movl	%gs:CPU_ACTIVE_THREAD,%edx
 	lock; cmpxchgl	%edx,0(%edi)	/* try to acquire the HW lock */
-	jne	3b			/* no - spin again */
+	jne	4b			/* no - spin again */
 	movl	$1,%eax			/* yes */
 	pop	%ebx
 	pop	%edi
@@ -376,7 +365,7 @@ LEAF_ENTRY(hw_lock_unlock)
 LEAF_ENTRY(hw_lock_try)
 	movl	L_ARG0,%edx		/* fetch lock pointer */
 
-	movl	L_PC,%ecx
+	movl	%gs:CPU_ACTIVE_THREAD,%ecx
 	DISABLE_PREEMPTION
 	movl	0(%edx),%eax
 	testl	%eax,%eax
@@ -387,7 +376,8 @@ LEAF_ENTRY(hw_lock_try)
 	movl	$1,%eax			/* success */
 	LEAF_RET
 
-1:	ENABLE_PREEMPTION		/* failure:  release preemption... */
+1:
+	ENABLE_PREEMPTION		/* failure:  release preemption... */
 	xorl	%eax,%eax		/* ...and return failure */
 	LEAF_RET
 
@@ -431,23 +421,21 @@ NONLEAF_ENTRY2(mutex_lock,_mutex_lock)
 
 	pushf				/* save interrupt state */
 	cli				/* disable interrupts */
+Lml_retry:
+	movl	%gs:CPU_ACTIVE_THREAD,%ecx
 
-ml_retry:
-	movl	B_PC,%ecx
-
-ml_get_hw:
+Lml_get_hw:
 	movl	M_ILK,%eax		/* read interlock */
 	testl	%eax,%eax		/* unlocked? */
-	je	1f			/* yes - attempt to lock it */
-	PAUSE				/* no  - pause */
-	jmp	ml_get_hw		/* try again */
-1:
+	jne	Lml_ilk_fail		/* no - take the slow path */
+
 	lock; cmpxchgl	%ecx,M_ILK	/* atomic compare and exchange */
-	jne	ml_get_hw		/* branch on failure to retry */
+	jne	Lml_get_hw		/* branch on failure to retry */
 
 	movl	M_LOCKED,%ecx		/* get lock owner */
 	testl	%ecx,%ecx		/* is the mutex locked? */
-	jne	ml_fail			/* yes, we lose */
+	jne	Lml_fail		/* yes, we lose */
+Lml_acquire:
 	movl	%gs:CPU_ACTIVE_THREAD,%ecx
 	movl	%ecx,M_LOCKED
 
@@ -457,12 +445,9 @@ ml_get_hw:
 	movl	%ecx,M_PC
 #endif
 
-	pushl	%edx			/* save mutex address */
-	pushl	%edx
-	call	EXT(lck_mtx_lock_acquire)
-	addl	$4,%esp
-	popl	%edx			/* restore mutex address */
-
+	cmpw	$0,M_WAITERS		/* are there any waiters? */
+	jne	Lml_waiters		/* yes, more work to do */
+Lml_return:
 	xorl	%eax,%eax
 	movl	%eax,M_ILK
 
@@ -470,15 +455,84 @@ ml_get_hw:
 
 	NONLEAF_RET
 
-ml_fail:
-ml_block:
+Lml_waiters:
+	pushl	%edx			/* save mutex address */
+	pushl	%edx
+	call	EXT(lck_mtx_lock_acquire)
+	addl	$4,%esp
+	popl	%edx			/* restore mutex address */
+	jmp	Lml_return
+
+Lml_ilk_fail:
+	/*
+	 * Slow path: call out to do the spinning.
+	 */
+	pushl	%edx			/* lock address */
+	call	EXT(lck_mtx_interlock_spin)
+	popl	%edx			/* lock pointer */
+	jmp	Lml_retry		/* try again */
+
+Lml_fail:
+	/*
+	 n Check if the owner is on another processor and therefore
+	 * we should try to spin before blocking.
+	 */
+	testl	$(OnProc),ACT_SPF(%ecx)
+	jz	Lml_block
+
+	/*
+	 * Here if owner is on another processor:
+	 *  - release the interlock
+	 *  - spin on the holder until release or timeout
+	 *  - in either case re-acquire the interlock
+	 *  - if released, acquire it
+	 *  - otherwise drop thru to block.
+	 */
+	xorl	%eax,%eax
+	movl	%eax,M_ILK		/* zero interlock */
+	popf
+	pushf				/* restore interrupt state */
+
+	push	%edx			/* lock address */
+	call	EXT(lck_mtx_lock_spin)	/* call out to do spinning */
+	addl	$4,%esp
+	movl	B_ARG0,%edx		/* refetch mutex address */
+
+	/* Re-acquire interlock */
+	cli				/* disable interrupts */
+Lml_reget_retry:
+	movl	%gs:CPU_ACTIVE_THREAD,%ecx
+
+Lml_reget_hw:
+	movl	M_ILK,%eax		/* read interlock */
+	testl	%eax,%eax		/* unlocked? */
+	jne	Lml_ilk_refail		/* no - slow path */
+
+	lock; cmpxchgl	%ecx,M_ILK	/* atomic compare and exchange */
+	jne	Lml_reget_hw		/* branch on failure to retry */
+
+	movl	M_LOCKED,%ecx		/* get lock owner */
+	testl	%ecx,%ecx		/* is the mutex free? */
+	je	Lml_acquire		/* yes, acquire */
+	
+Lml_block:
 	CHECK_MYLOCK(M_THREAD)
 	pushl	M_LOCKED
 	pushl	%edx			/* push mutex address */
 	call	EXT(lck_mtx_lock_wait)	/* wait for the lock */
 	addl	$8,%esp
 	movl	B_ARG0,%edx		/* refetch mutex address */
-	jmp	ml_retry		/* and try again */
+	cli				/* ensure interrupts disabled */
+	jmp	Lml_retry		/* and try again */
+
+Lml_ilk_refail:
+	/*
+	 * Slow path: call out to do the spinning.
+	 */
+	pushl	%edx			/* lock address */
+	call	EXT(lck_mtx_interlock_spin)
+	popl	%edx			/* lock pointer */
+	jmp	Lml_reget_retry		/* try again */
 
 NONLEAF_ENTRY2(mutex_try,_mutex_try)	
 
@@ -487,24 +541,22 @@ NONLEAF_ENTRY2(mutex_try,_mutex_try)
 	CHECK_MUTEX_TYPE()
 	CHECK_NO_SIMPLELOCKS()
 
-	movl	B_PC,%ecx
-
 	pushf				/* save interrupt state */
 	cli				/* disable interrupts */
+Lmt_retry:
+	movl	%gs:CPU_ACTIVE_THREAD,%ecx
 
-mt_get_hw:
+Lmt_get_hw:
 	movl	M_ILK,%eax		/* read interlock */
 	testl	%eax,%eax		/* unlocked? */
-	je	1f			/* yes - attempt to lock it */
-	PAUSE				/* no  - pause */
-	jmp	mt_get_hw		/* try again */
-1:
+	jne	Lmt_ilk_fail		/* no - slow path */
+
 	lock; cmpxchgl	%ecx,M_ILK	/* atomic compare and exchange */
-	jne	mt_get_hw		/* branch on failure to retry */
+	jne	Lmt_get_hw		/* branch on failure to retry */
 
 	movl	M_LOCKED,%ecx		/* get lock owner */
 	testl	%ecx,%ecx		/* is the mutex locked? */
-	jne	mt_fail			/* yes, we lose */
+	jne	Lmt_fail		/* yes, we lose */
 	movl	%gs:CPU_ACTIVE_THREAD,%ecx
 	movl	%ecx,M_LOCKED
 
@@ -514,22 +566,35 @@ mt_get_hw:
 	movl	%ecx,M_PC
 #endif
 
-	pushl	%edx			/* save mutex address */
-	pushl	%edx
-	call	EXT(lck_mtx_lock_acquire)
-	addl	$4,%esp
-	popl	%edx			/* restore mutex address */
-
+	cmpl	$0,M_WAITERS		/* are there any waiters? */
+	jne	Lmt_waiters		/* yes, more work to do */
+Lmt_return:
 	xorl	%eax,%eax
 	movl	%eax,M_ILK
-
 	popf				/* restore interrupt state */
 
 	movl	$1,%eax
 
 	NONLEAF_RET
 
-mt_fail:
+Lmt_waiters:
+	pushl	%edx			/* save mutex address */
+	pushl	%edx
+	call	EXT(lck_mtx_lock_acquire)
+	addl	$4,%esp
+	popl	%edx			/* restore mutex address */
+	jmp	Lmt_return
+
+Lmt_ilk_fail:
+	/*
+	 * Slow path: call out to do the spinning.
+	 */
+	pushl	%edx			/* lock address */
+	call	EXT(lck_mtx_interlock_spin)
+	popl	%edx			/* lock pointer */
+	jmp	Lmt_retry		/* try again */
+
+Lmt_fail:
 	xorl	%eax,%eax
 	movl	%eax,M_ILK
 
@@ -545,25 +610,23 @@ NONLEAF_ENTRY(mutex_unlock)
 	CHECK_MUTEX_TYPE()
 	CHECK_THREAD(M_THREAD)
 
-	movl	B_PC,%ecx
-
 	pushf				/* save interrupt state */
 	cli				/* disable interrupts */
+Lmu_retry:
+	movl	%gs:CPU_ACTIVE_THREAD,%ecx
 
-mu_get_hw:
+Lmu_get_hw:
 	movl	M_ILK,%eax		/* read interlock */
 	testl	%eax,%eax		/* unlocked? */
-	je	1f			/* yes - attempt to lock it */
-	PAUSE				/* no  - pause */
-	jmp	mu_get_hw		/* try again */
-1:
+	jne	Lmu_ilk_fail		/* no - slow path */
+
 	lock; cmpxchgl	%ecx,M_ILK	/* atomic compare and exchange */
-	jne	mu_get_hw		/* branch on failure to retry */
+	jne	Lmu_get_hw		/* branch on failure to retry */
 
 	cmpw	$0,M_WAITERS		/* are there any waiters? */
-	jne	mu_wakeup		/* yes, more work to do */
+	jne	Lmu_wakeup		/* yes, more work to do */
 
-mu_doit:
+Lmu_doit:
 
 #if	MACH_LDEBUG
 	movl	$0,M_THREAD		/* disown thread */
@@ -578,13 +641,22 @@ mu_doit:
 
 	NONLEAF_RET
 
-mu_wakeup:
+Lmu_ilk_fail:
+	/*
+	 * Slow path: call out to do the spinning.
+	 */
+	pushl	%edx			/* lock address */
+	call	EXT(lck_mtx_interlock_spin)
+	popl	%edx			/* lock pointer */
+	jmp	Lmu_retry		/* try again */
+
+Lmu_wakeup:
 	pushl	M_LOCKED
 	pushl	%edx			/* push mutex address */
 	call	EXT(lck_mtx_unlock_wakeup)/* yes, wake a thread */
 	addl	$8,%esp
 	movl	B_ARG0,%edx		/* restore lock pointer */
-	jmp	mu_doit
+	jmp	Lmu_doit
 
 /*
  * lck_mtx_lock()
@@ -605,32 +677,27 @@ NONLEAF_ENTRY(lck_mtx_lock)
 
 	pushf				/* save interrupt state */
 	cli				/* disable interrupts */
+Llml_retry:
+	movl	%gs:CPU_ACTIVE_THREAD,%ecx
 
-lml_retry:
-	movl	B_PC,%ecx
-
-lml_get_hw:
+Llml_get_hw:
 	movl	M_ILK,%eax		/* read interlock */
 	testl	%eax,%eax		/* unlocked? */
-	je	1f			/* yes - attempt to lock it */
-	PAUSE				/* no  - pause */
-	jmp	lml_get_hw		/* try again */
-1:
+	jne	Llml_ilk_fail		/* no - slow path */
+
 	lock; cmpxchgl	%ecx,M_ILK	/* atomic compare and exchange */
-	jne	lml_get_hw		/* branch on failure to retry */
+	jne	Llml_get_hw		/* branch on failure to retry */
 
 	movl	M_LOCKED,%ecx		/* get lock owner */
 	testl	%ecx,%ecx		/* is the mutex locked? */
-	jne	lml_fail		/* yes, we lose */
+	jne	Llml_fail		/* yes, we lose */
+Llml_acquire:
 	movl	%gs:CPU_ACTIVE_THREAD,%ecx
 	movl	%ecx,M_LOCKED
 
-	pushl	%edx			/* save mutex address */
-	pushl	%edx
-	call	EXT(lck_mtx_lock_acquire)
-	addl	$4,%esp
-	popl	%edx			/* restore mutex address */
-
+	cmpl	$0,M_WAITERS		/* are there any waiters? */
+	jne	Llml_waiters		/* yes, more work to do */
+Llml_return:
 	xorl	%eax,%eax
 	movl	%eax,M_ILK
 
@@ -638,7 +705,68 @@ lml_get_hw:
 
 	NONLEAF_RET
 
-lml_fail:
+Llml_waiters:
+	pushl	%edx			/* save mutex address */
+	pushl	%edx
+	call	EXT(lck_mtx_lock_acquire)
+	addl	$4,%esp
+	popl	%edx			/* restore mutex address */
+	jmp	Llml_return
+
+Llml_ilk_fail:
+	/*
+	 * Slow path: call out to do the spinning.
+	 */
+	pushl	%edx			/* lock address */
+	call	EXT(lck_mtx_interlock_spin)
+	popl	%edx			/* lock pointer */
+	jmp	Llml_retry		/* try again */
+
+Llml_fail:
+	/*
+	 * Check if the owner is on another processor and therefore
+	 * we should try to spin before blocking.
+	 */
+	testl	$(OnProc),ACT_SPF(%ecx)
+	jz	Llml_block
+
+	/*
+	 * Here if owner is on another processor:
+	 *  - release the interlock
+	 *  - spin on the holder until release or timeout
+	 *  - in either case re-acquire the interlock
+	 *  - if released, acquire it
+	 *  - otherwise drop thru to block.
+	 */
+	xorl	%eax,%eax
+	movl	%eax,M_ILK		/* zero interlock */
+	popf
+	pushf				/* restore interrupt state */
+
+	pushl	%edx			/* save mutex address */
+	pushl	%edx
+	call	EXT(lck_mtx_lock_spin)
+	addl	$4,%esp
+	popl	%edx			/* restore mutex address */
+
+	/* Re-acquire interlock */
+	cli				/* disable interrupts */
+Llml_reget_retry:
+	movl	%gs:CPU_ACTIVE_THREAD,%ecx
+
+Llml_reget_hw:
+	movl	M_ILK,%eax		/* read interlock */
+	testl	%eax,%eax		/* unlocked? */
+	jne	Llml_ilk_refail		/* no - slow path */
+
+	lock; cmpxchgl	%ecx,M_ILK	/* atomic compare and exchange */
+	jne	Llml_reget_hw		/* branch on failure to retry */
+
+	movl	M_LOCKED,%ecx		/* get lock owner */
+	testl	%ecx,%ecx		/* is the mutex free? */
+	je	Llml_acquire		/* yes, acquire */
+	
+Llml_block:
 	CHECK_MYLOCK(M_THREAD)
 	pushl	%edx			/* save mutex address */
 	pushl	M_LOCKED
@@ -646,7 +774,17 @@ lml_fail:
 	call	EXT(lck_mtx_lock_wait)	/* wait for the lock */
 	addl	$8,%esp
 	popl	%edx			/* restore mutex address */
-	jmp	lml_retry		/* and try again */
+	cli				/* ensure interrupts disabled */
+	jmp	Llml_retry		/* and try again */
+
+Llml_ilk_refail:
+	/*
+	 * Slow path: call out to do the spinning.
+	 */
+	pushl	%edx			/* lock address */
+	call	EXT(lck_mtx_interlock_spin)
+	popl	%edx			/* lock pointer */
+	jmp	Llml_reget_retry	/* try again */
 
 NONLEAF_ENTRY(lck_mtx_try_lock)
 
@@ -657,33 +795,28 @@ NONLEAF_ENTRY(lck_mtx_try_lock)
 	CHECK_NO_SIMPLELOCKS()
 	CHECK_PREEMPTION_LEVEL()
 
-	movl	B_PC,%ecx
-
 	pushf				/* save interrupt state */
 	cli				/* disable interrupts */
+Llmt_retry:
+	movl	%gs:CPU_ACTIVE_THREAD,%ecx
 
-lmt_get_hw:
+Llmt_get_hw:
 	movl	M_ILK,%eax		/* read interlock */
 	testl	%eax,%eax		/* unlocked? */
-	je	1f			/* yes - attempt to lock it */
-	PAUSE				/* no  - pause */
-	jmp	lmt_get_hw		/* try again */
-1:
+	jne	Llmt_ilk_fail		/* no - slow path */
+
 	lock; cmpxchgl	%ecx,M_ILK	/* atomic compare and exchange */
-	jne	lmt_get_hw		/* branch on failure to retry */
+	jne	Llmt_get_hw		/* branch on failure to retry */
 
 	movl	M_LOCKED,%ecx		/* get lock owner */
 	testl	%ecx,%ecx		/* is the mutex locked? */
-	jne	lmt_fail		/* yes, we lose */
+	jne	Llmt_fail		/* yes, we lose */
 	movl	%gs:CPU_ACTIVE_THREAD,%ecx
 	movl	%ecx,M_LOCKED
 
-	pushl	%edx			/* save mutex address */
-	pushl	%edx
-	call	EXT(lck_mtx_lock_acquire)
-	addl	$4,%esp
-	popl	%edx			/* restore mutex address */
-
+	cmpl	$0,M_WAITERS		/* are there any waiters? */
+	jne	Llmt_waiters		/* yes, more work to do */
+Llmt_return:
 	xorl	%eax,%eax
 	movl	%eax,M_ILK
 
@@ -692,7 +825,24 @@ lmt_get_hw:
 	movl	$1,%eax			/* return success */
 	NONLEAF_RET
 
-lmt_fail:
+Llmt_waiters:
+	pushl	%edx			/* save mutex address */
+	pushl	%edx
+	call	EXT(lck_mtx_lock_acquire)
+	addl	$4,%esp
+	popl	%edx			/* restore mutex address */
+	jmp	Llmt_return
+
+Llmt_ilk_fail:
+	/*
+	 * Slow path: call out to do the spinning.
+	 */
+	pushl	%edx			/* lock address */
+	call	EXT(lck_mtx_interlock_spin)
+	popl	%edx			/* lock pointer */
+	jmp	Llmt_retry		/* try again */
+
+Llmt_fail:
 	xorl	%eax,%eax
 	movl	%eax,M_ILK
 
@@ -707,25 +857,23 @@ NONLEAF_ENTRY(lck_mtx_unlock)
 	cmpl	$(MUTEX_IND),M_ITAG	/* is this indirect? */
 	cmove	M_PTR,%edx		/* yes - take indirection */
 
-	movl	B_PC,%ecx
-
 	pushf				/* save interrupt state */
 	cli				/* disable interrupts */
+Llmu_retry:
+	movl	%gs:CPU_ACTIVE_THREAD,%ecx
 
-lmu_get_hw:
+Llmu_get_hw:
 	movl	M_ILK,%eax		/* read interlock */
 	testl	%eax,%eax		/* unlocked? */
-	je	1f			/* yes - attempt to lock it */
-	PAUSE				/* no  - pause */
-	jmp	lmu_get_hw		/* try again */
-1:
+	jne	Llmu_ilk_fail		/* no - slow path */
+
 	lock; cmpxchgl	%ecx,M_ILK	/* atomic compare and exchange */
-	jne	lmu_get_hw		/* branch on failure to retry */
+	jne	Llmu_get_hw		/* branch on failure to retry */
 
 	cmpw	$0,M_WAITERS		/* are there any waiters? */
-	jne	lmu_wakeup		/* yes, more work to do */
+	jne	Llmu_wakeup		/* yes, more work to do */
 
-lmu_doit:
+Llmu_doit:
 	xorl	%ecx,%ecx
 	movl	%ecx,M_LOCKED		/* unlock the mutex */
 
@@ -735,14 +883,23 @@ lmu_doit:
 
 	NONLEAF_RET
 
-lmu_wakeup:
+Llmu_ilk_fail:
+	/*
+	 * Slow path: call out to do the spinning.
+	 */
+	pushl	%edx			/* lock address */
+	call	EXT(lck_mtx_interlock_spin)
+	popl	%edx			/* lock pointer */
+	jmp	Llmu_retry		/* try again */
+
+Llmu_wakeup:
 	pushl	%edx			/* save mutex address */
 	pushl	M_LOCKED
 	pushl	%edx			/* push mutex address */
 	call	EXT(lck_mtx_unlock_wakeup)/* yes, wake a thread */
 	addl	$8,%esp
 	popl	%edx			/* restore mutex pointer */
-	jmp	lmu_doit
+	jmp	Llmu_doit
 
 LEAF_ENTRY(lck_mtx_ilk_unlock)
 	movl	L_ARG0,%edx		/* no indirection here */
@@ -840,14 +997,14 @@ LEAF_ENTRY(i_bit_set)
 	movl	L_ARG0,%edx
 	movl	L_ARG1,%eax
 	lock
-	bts	%dl,(%eax)
+	bts	%edx,(%eax)
 	LEAF_RET
 
 LEAF_ENTRY(i_bit_clear)
 	movl	L_ARG0,%edx
 	movl	L_ARG1,%eax
 	lock
-	btr	%dl,(%eax)
+	btr	%edx,(%eax)
 	LEAF_RET
 
 LEAF_ENTRY(bit_lock)

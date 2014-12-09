@@ -1,23 +1,31 @@
 /*
  * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
  * 
- * The contents of this file constitute Original Code as defined in and
- * are subject to the Apple Public Source License Version 1.1 (the
- * "License").  You may not use this file except in compliance with the
- * License.  Please obtain a copy of the License at
- * http://www.apple.com/publicsource and read it before using this file.
- * 
- * This Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
+ * This file contains Original Code and/or Modifications of Original Code 
+ * as defined in and that are subject to the Apple Public Source License 
+ * Version 2.0 (the 'License'). You may not use this file except in 
+ * compliance with the License.  The rights granted to you under the 
+ * License may not be used to create, or enable the creation or 
+ * redistribution of, unlawful or unlicensed copies of an Apple operating 
+ * system, or to circumvent, violate, or enable the circumvention or 
+ * violation of, any terms of an Apple operating system software license 
+ * agreement.
+ *
+ * Please obtain a copy of the License at 
+ * http://www.opensource.apple.com/apsl/ and read it before using this 
+ * file.
+ *
+ * The Original Code and all software distributed under the License are 
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
+ * Please see the License for the specific language governing rights and 
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
  */
 
 /*
@@ -690,7 +698,7 @@ hfs_vnop_readdirattr(ap)
 	}
 
 	dir_entries = dcp->c_entries;
-	if (dcp->c_attr.ca_fileid == kHFSRootFolderID && hfsmp->jnl) {
+	if (dcp->c_attr.ca_fileid == kHFSRootFolderID && (hfsmp->jnl || ((HFSTOVCB(hfsmp)->vcbAtrb & kHFSVolumeJournaledMask) && (hfsmp->hfs_flags & HFS_READ_ONLY)))) {
 		dir_entries -= 3;
 	}
 
@@ -887,7 +895,12 @@ hfs_vnop_readdirattr(ap)
 
 	/* Make sure dcp is locked exclusive before changing c_dirhinttag. */
 	if (shared_cnode_lock) {
-		lck_rw_lock_shared_to_exclusive(&dcp->c_rwlock);
+		/*
+		 * If the upgrade fails we loose the lock and
+		 * have to take the exclusive lock on our own.
+		 */
+		if (lck_rw_lock_shared_to_exclusive(&dcp->c_rwlock) != 0)
+			lck_rw_lock_exclusive(&dcp->c_rwlock);
 		dcp->c_lockowner = current_thread();
 		shared_cnode_lock = 0;
 	}
@@ -901,7 +914,12 @@ exit:
 	/* Drop directory hint on error or if there are no more entries */
 	if (dirhint && (error || index >= dir_entries)) {
 		if (shared_cnode_lock) {
-			lck_rw_lock_shared_to_exclusive(&dcp->c_rwlock);
+			/*
+			 * If the upgrade fails we loose the lock and
+			 * have to take the exclusive lock on our own.
+			 */
+			if (lck_rw_lock_shared_to_exclusive(&dcp->c_rwlock) != 0)
+				lck_rw_lock_exclusive(&dcp->c_rwlock);
 			dcp->c_lockowner = current_thread();
 		}
 		hfs_reldirhint(dcp, dirhint);
@@ -1614,7 +1632,7 @@ packdirattr(
 		if (descp->cd_parentcnid == kHFSRootParentID) {
 			if (hfsmp->hfs_privdir_desc.cd_cnid != 0)
 				--entries;	    /* hide private dir */
-			if (hfsmp->jnl)
+			if (hfsmp->jnl || ((HFSTOVCB(hfsmp)->vcbAtrb & kHFSVolumeJournaledMask) && (hfsmp->hfs_flags & HFS_READ_ONLY)))
 				entries -= 2;	/* hide the journal files */
 		}
 

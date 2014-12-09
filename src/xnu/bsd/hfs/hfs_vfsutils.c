@@ -1,23 +1,31 @@
 /*
  * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
  * 
- * The contents of this file constitute Original Code as defined in and
- * are subject to the Apple Public Source License Version 1.1 (the
- * "License").  You may not use this file except in compliance with the
- * License.  Please obtain a copy of the License at
- * http://www.apple.com/publicsource and read it before using this file.
- * 
- * This Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
+ * This file contains Original Code and/or Modifications of Original Code 
+ * as defined in and that are subject to the Apple Public Source License 
+ * Version 2.0 (the 'License'). You may not use this file except in 
+ * compliance with the License.  The rights granted to you under the 
+ * License may not be used to create, or enable the creation or 
+ * redistribution of, unlawful or unlicensed copies of an Apple operating 
+ * system, or to circumvent, violate, or enable the circumvention or 
+ * violation of, any terms of an Apple operating system software license 
+ * agreement.
+ *
+ * Please obtain a copy of the License at 
+ * http://www.opensource.apple.com/apsl/ and read it before using this 
+ * file.
+ *
+ * The Original Code and all software distributed under the License are 
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
+ * Please see the License for the specific language governing rights and 
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
  */
 /*	@(#)hfs_vfsutils.c	4.0
 *
@@ -529,6 +537,8 @@ OSErr hfs_MountHFSPlusVolume(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
 	/* Pick up volume name and create date */
 	retval = cat_idlookup(hfsmp, kHFSRootFolderID, &cndesc, &cnattr, NULL);
 	if (retval) {
+		if (hfsmp->hfs_attribute_vp)
+			hfs_unlock(VTOC(hfsmp->hfs_attribute_vp));
 		hfs_unlock(VTOC(hfsmp->hfs_allocation_vp));
 		hfs_unlock(VTOC(hfsmp->hfs_catalog_vp));
 		hfs_unlock(VTOC(hfsmp->hfs_extents_vp));
@@ -562,7 +572,7 @@ OSErr hfs_MountHFSPlusVolume(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
 	//
 	if (   (vcb->vcbAtrb & kHFSVolumeJournaledMask)
 		&& (SWAP_BE32(vhp->lastMountedVersion) != kHFSJMountVersion)
-		&& (hfsmp->jnl == NULL)) {
+	        && (hfsmp->jnl == NULL)) {
 
 		retval = hfs_late_journal_init(hfsmp, vhp, args);
 		if (retval != 0) {
@@ -604,9 +614,13 @@ OSErr hfs_MountHFSPlusVolume(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
 		} else if (hfsmp->jnl) {
 			vfs_setflags(hfsmp->hfs_mp, (uint64_t)((unsigned int)MNT_JOURNALED));
 		}
-	} else if (hfsmp->jnl) {
+	} else if (hfsmp->jnl || ((vcb->vcbAtrb & kHFSVolumeJournaledMask) && (hfsmp->hfs_flags & HFS_READ_ONLY))) {
 		struct cat_attr jinfo_attr, jnl_attr;
 		
+		if (hfsmp->hfs_flags & HFS_READ_ONLY) {
+		    vcb->vcbAtrb &= ~kHFSVolumeJournaledMask;
+		}
+
 		// if we're here we need to fill in the fileid's for the
 		// journal and journal_info_block.
 		hfsmp->hfs_jnlinfoblkid = GetFileInfo(vcb, kRootDirID, ".journal_info_block", &jinfo_attr, NULL);
@@ -614,6 +628,10 @@ OSErr hfs_MountHFSPlusVolume(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
 		if (hfsmp->hfs_jnlinfoblkid == 0 || hfsmp->hfs_jnlfileid == 0) {
 			printf("hfs: danger! couldn't find the file-id's for the journal or journal_info_block\n");
 			printf("hfs: jnlfileid %d, jnlinfoblkid %d\n", hfsmp->hfs_jnlfileid, hfsmp->hfs_jnlinfoblkid);
+		}
+
+		if (hfsmp->hfs_flags & HFS_READ_ONLY) {
+		    vcb->vcbAtrb |= kHFSVolumeJournaledMask;
 		}
 	}
 
@@ -1728,6 +1746,28 @@ hfs_early_journal_init(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
 	hfsmp->jnl_start = jibp->offset / SWAP_BE32(vhp->blockSize);
 	hfsmp->jnl_size  = jibp->size;
 
+	if ((hfsmp->hfs_flags & HFS_READ_ONLY) && (vfs_flags(hfsmp->hfs_mp) & MNT_ROOTFS) == 0) {
+	    // if the file system is read-only, check if the journal is empty.
+	    // if it is, then we can allow the mount.  otherwise we have to
+	    // return failure.
+	    retval = journal_is_clean(hfsmp->jvp,
+		                      jibp->offset + embeddedOffset,
+				      jibp->size,
+				      devvp,
+		                      hfsmp->hfs_phys_block_size);
+
+	    hfsmp->jnl = NULL;
+
+	    buf_brelse(jinfo_bp);
+
+	    if (retval) {
+	      printf("hfs: early journal init: volume on %s is read-only and journal is dirty.  Can not mount volume.\n",
+                     vnode_name(devvp));
+	    }
+
+	    return retval;
+	}
+
 	if (jibp->flags & kJIJournalNeedInitMask) {
 		printf("hfs: Initializing the journal (joffset 0x%llx sz 0x%llx)...\n",
 			   jibp->offset + embeddedOffset, jibp->size);
@@ -1914,6 +1954,28 @@ hfs_late_journal_init(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp, void *_a
 	// save this off for the hack-y check in hfs_remove()
 	hfsmp->jnl_start = jibp->offset / SWAP_BE32(vhp->blockSize);
 	hfsmp->jnl_size  = jibp->size;
+
+	if ((hfsmp->hfs_flags & HFS_READ_ONLY) && (vfs_flags(hfsmp->hfs_mp) & MNT_ROOTFS) == 0) {
+	    // if the file system is read-only, check if the journal is empty.
+	    // if it is, then we can allow the mount.  otherwise we have to
+	    // return failure.
+	    retval = journal_is_clean(hfsmp->jvp,
+		                      jibp->offset + (off_t)vcb->hfsPlusIOPosOffset,
+				      jibp->size,
+				      devvp,
+		                      hfsmp->hfs_phys_block_size);
+
+	    hfsmp->jnl = NULL;
+
+	    buf_brelse(jinfo_bp);
+
+	    if (retval) {
+	      printf("hfs: late journal init: volume on %s is read-only and journal is dirty.  Can not mount volume.\n",
+		     vnode_name(devvp));
+	    }
+
+	    return retval;
+	}
 
 	if (jibp->flags & kJIJournalNeedInitMask) {
 		printf("hfs: Initializing the journal (joffset 0x%llx sz 0x%llx)...\n",

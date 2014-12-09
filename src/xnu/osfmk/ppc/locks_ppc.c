@@ -1,23 +1,31 @@
 /*
  * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
  *
- * @APPLE_LICENSE_HEADER_START@
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_START@
  * 
- * The contents of this file constitute Original Code as defined in and
- * are subject to the Apple Public Source License Version 1.1 (the
- * "License").  You may not use this file except in compliance with the
- * License.  Please obtain a copy of the License at
- * http://www.apple.com/publicsource and read it before using this file.
- * 
- * This Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
- * 
- * @APPLE_LICENSE_HEADER_END@
+ * This file contains Original Code and/or Modifications of Original Code 
+ * as defined in and that are subject to the Apple Public Source License 
+ * Version 2.0 (the 'License'). You may not use this file except in 
+ * compliance with the License.  The rights granted to you under the 
+ * License may not be used to create, or enable the creation or 
+ * redistribution of, unlawful or unlicensed copies of an Apple operating 
+ * system, or to circumvent, violate, or enable the circumvention or 
+ * violation of, any terms of an Apple operating system software license 
+ * agreement.
+ *
+ * Please obtain a copy of the License at 
+ * http://www.opensource.apple.com/apsl/ and read it before using this 
+ * file.
+ *
+ * The Original Code and all software distributed under the License are 
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, 
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. 
+ * Please see the License for the specific language governing rights and 
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_OSREFERENCE_HEADER_END@
  */
 /*
  * @OSF_COPYRIGHT@
@@ -704,6 +712,9 @@ lock_init(
 #if	MACH_LDEBUG
 	lck->lck_rw_deb.type = RW_TAG;
 	lck->lck_rw_attr |= (LCK_RW_ATTR_DEBUG|LCK_RW_ATTR_DIS_THREAD|LCK_RW_ATTR_DIS_MYLOCK);
+	lck->lck_rw.lck_rw_priv_excl = TRUE;
+#else
+	lck->lck_rw_priv_excl = TRUE;
 #endif
 
 }
@@ -810,6 +821,10 @@ lck_rw_init(
 		}
 	} else {
 		(void) memset((void *) lck, 0, sizeof(lck_rw_t));
+		if ((lck_attr->lck_attr_val)  & LCK_ATTR_RW_SHARED_PRIORITY)
+			lck->lck_rw_priv_excl = FALSE;
+		else
+			lck->lck_rw_priv_excl = TRUE;
 	}
 
 	lck_grp_reference(grp);
@@ -826,6 +841,10 @@ lck_rw_ext_init(
 	lck_attr_t	*attr) {
 
 	bzero((void *)lck, sizeof(lck_rw_ext_t));
+	if ((attr->lck_attr_val)  & LCK_ATTR_RW_SHARED_PRIORITY)
+		lck->lck_rw.lck_rw_priv_excl = FALSE;
+	else
+		lck->lck_rw.lck_rw_priv_excl = TRUE;
 
 	if ((attr->lck_attr_val) & LCK_ATTR_DEBUG) {
 		lck->lck_rw_deb.type = RW_TAG;
@@ -1083,7 +1102,8 @@ lck_rw_lock_shared_gen(
 
 	lck_rw_ilk_lock(lck);
 
-	while (lck->lck_rw_want_excl || lck->lck_rw_want_upgrade) {
+	while ((lck->lck_rw_want_excl || lck->lck_rw_want_upgrade) &&
+	        ((lck->lck_rw_shared_cnt == 0) || (lck->lck_rw_priv_excl))) {
 		i = lock_wait_time[1];
 
 		KERNEL_DEBUG(MACHDBG_CODE(DBG_MACH_LOCKS, LCK_RW_LCK_SHARED_CODE) | DBG_FUNC_START,
@@ -1091,12 +1111,15 @@ lck_rw_lock_shared_gen(
 
 		if (i != 0) {
 			lck_rw_ilk_unlock(lck);
-			while (--i != 0 && (lck->lck_rw_want_excl || lck->lck_rw_want_upgrade))
+			while (--i != 0 && 
+			       (lck->lck_rw_want_excl || lck->lck_rw_want_upgrade) &&
+			       ((lck->lck_rw_shared_cnt == 0) || (lck->lck_rw_priv_excl)))
 				continue;
 			lck_rw_ilk_lock(lck);
 		}
 
-		if (lck->lck_rw_want_excl || lck->lck_rw_want_upgrade) {
+		if ((lck->lck_rw_want_excl || lck->lck_rw_want_upgrade) &&
+		    ((lck->lck_rw_shared_cnt == 0) || (lck->lck_rw_priv_excl))) {
 			lck->lck_rw_waiting = TRUE;
 			res = assert_wait((event_t)(((unsigned int*)lck)+((sizeof(lck_rw_t)-1)/sizeof(unsigned int))), THREAD_UNINT);
 			if (res == THREAD_WAITING) {
@@ -1273,7 +1296,8 @@ lck_rw_try_lock_shared_gen(
 {
 	lck_rw_ilk_lock(lck);
 
-	if (lck->lck_rw_want_excl || lck->lck_rw_want_upgrade) {
+	if ((lck->lck_rw_want_excl || lck->lck_rw_want_upgrade) &&
+	    ((lck->lck_rw_shared_cnt == 0) || (lck->lck_rw_priv_excl))) {
 		lck_rw_ilk_unlock(lck);
 		return(FALSE);
 	}
@@ -1509,7 +1533,8 @@ lck_rw_lock_shared_ext(
 	if (lock_stat)
 		lck->lck_rw_grp->lck_grp_stat.lck_grp_rw_stat.lck_grp_rw_util_cnt++;
 
-	while (lck->lck_rw.lck_rw_want_excl || lck->lck_rw.lck_rw_want_upgrade) {
+	while ((lck->lck_rw.lck_rw_want_excl || lck->lck_rw.lck_rw_want_upgrade) &&
+	       ((lck->lck_rw.lck_rw_shared_cnt == 0) || (lck->lck_rw.lck_rw_priv_excl))) {
 		i = lock_wait_time[1];
 
 		KERNEL_DEBUG(MACHDBG_CODE(DBG_MACH_LOCKS, LCK_RW_LCK_SHARED_CODE) | DBG_FUNC_START,
@@ -1522,12 +1547,15 @@ lck_rw_lock_shared_ext(
 
 		if (i != 0) {
 			lck_rw_ilk_unlock(&lck->lck_rw);
-			while (--i != 0 && (lck->lck_rw.lck_rw_want_excl || lck->lck_rw.lck_rw_want_upgrade))
+			while (--i != 0 && 
+			       (lck->lck_rw.lck_rw_want_excl || lck->lck_rw.lck_rw_want_upgrade) &&
+	       		       ((lck->lck_rw.lck_rw_shared_cnt == 0) || (lck->lck_rw.lck_rw_priv_excl)))
 				continue;
 			lck_rw_ilk_lock(&lck->lck_rw);
 		}
 
-		if (lck->lck_rw.lck_rw_want_excl || lck->lck_rw.lck_rw_want_upgrade) {
+		if ((lck->lck_rw.lck_rw_want_excl || lck->lck_rw.lck_rw_want_upgrade)  &&
+		   ((lck->lck_rw.lck_rw_shared_cnt == 0) || (lck->lck_rw.lck_rw_priv_excl))) {
 			lck->lck_rw.lck_rw_waiting = TRUE;
 			res = assert_wait((event_t)(((unsigned int*)rlck)+((sizeof(lck_rw_t)-1)/sizeof(unsigned int))), THREAD_UNINT);
 			if (res == THREAD_WAITING) {
@@ -1784,7 +1812,8 @@ lck_rw_try_lock_shared_ext(
 	if (lock_stat)
 		lck->lck_rw_grp->lck_grp_stat.lck_grp_rw_stat.lck_grp_rw_util_cnt++;
 
-	if (lck->lck_rw.lck_rw_want_excl || lck->lck_rw.lck_rw_want_upgrade) {
+	if ((lck->lck_rw.lck_rw_want_excl || lck->lck_rw.lck_rw_want_upgrade) &&
+	    ((lck->lck_rw.lck_rw_shared_cnt == 0) || (lck->lck_rw.lck_rw_priv_excl))) {
 		if (lock_stat) {
 			lck->lck_rw_grp->lck_grp_stat.lck_grp_rw_stat.lck_grp_rw_miss_cnt++;
 		}
