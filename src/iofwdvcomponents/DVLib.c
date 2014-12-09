@@ -418,6 +418,7 @@ static void handlePCRLock(void *refcon, UInt32 generation, UInt16 nodeID, UInt32
 static IOReturn writeDeviceOutputMCR(IOFireWireLibDeviceRef interface, UInt32 mask, UInt32 val)
 {
     UInt32 oldVal, newVal;
+	UInt32 oldValHost, newValHost;
     IOReturn err;
     FWAddress addr;
     io_object_t obj;
@@ -427,10 +428,12 @@ static IOReturn writeDeviceOutputMCR(IOFireWireLibDeviceRef interface, UInt32 ma
     addr.addressLo = 0xf0000900;
     obj = (*interface)->GetDevice(interface);
     err = (*interface)->ReadQuadlet(interface, obj, &addr, &oldVal, false, 0);
+	oldValHost = EndianU32_BtoN( oldVal );
     
     if(err == kIOReturnSuccess) {
-        if( (oldVal & mask) != val) {
-            newVal = (oldVal & ~mask) | val;
+        if( (oldValHost & mask) != val) {
+            newValHost = (oldValHost & ~mask) | val;
+			newVal = EndianU32_NtoB( newValHost );
             err = (*interface)->CompareSwap(interface, obj, &addr, oldVal, newVal, false, 0);
         }
     }
@@ -1258,7 +1261,7 @@ void DVFreeThread(DVThread * dvThread)
     pthread_mutex_destroy(&dvThread->fRequestMutex);
 
 	IODeregisterForSystemPower(&dvThread->fPowerManagementNotifier);
-	
+	IOServiceClose(dvThread->fPowerNotifyConnect);
     memset(dvThread, 0xde, sizeof(DVThread));
     free(dvThread);
 
@@ -1559,7 +1562,7 @@ IOReturn DVDeviceOpen(DVThread *dvThread, DVDevice *device)
                                                     device, handlePCRLock, &device->fOutPlug);
         if(err != kIOReturnSuccess) break;
         
-        err = writePlug(device->fAVCProtoInterface, device->fOutPlug, 122 << kIOFWPCROutputPayloadPhase);
+		err = writePlug(device->fAVCProtoInterface, device->fOutPlug, 122 << kIOFWPCROutputPayloadPhase);
         if(err != kIOReturnSuccess) break;
     } while (0);
     if(err != kIOReturnSuccess)
@@ -1712,7 +1715,7 @@ static IOReturn openStream(DVStream *stream, bool forWrite, UInt32 packetSize)
         else {
             // Figure out if the device is already tranmitting, in which case use that channel and don't
             // allocate bandwidth
-            UInt32 plugVal;
+            UInt32 plugVal, plugValHost;
             io_object_t obj;
             FWAddress addr;
             UInt32 size;
@@ -1723,8 +1726,10 @@ static IOReturn openStream(DVStream *stream, bool forWrite, UInt32 packetSize)
             size = 4;
             obj = (*stream->pFWDevice)->GetDevice(stream->pFWDevice);
             err = (*stream->pFWDevice)->ReadQuadlet(stream->pFWDevice, obj, &addr, &plugVal, false, 0);
-            if(plugVal & (kIOFWPCRBroadcast | kIOFWPCRP2PCount)) {
-                UInt32 chan = (plugVal & kIOFWPCRChannel)>>kIOFWPCRChannelPhase;
+			plugValHost = EndianU32_BtoN( plugVal );
+
+            if(plugValHost & (kIOFWPCRBroadcast | kIOFWPCRP2PCount)) {
+                UInt32 chan = (plugValHost & kIOFWPCRChannel)>>kIOFWPCRChannelPhase;
                 //printf("Already transmitting on channel %x\n", chan);
                 stream->fChannelMask = 1ULL << (63-chan);
                 allocBandwidth = false;
@@ -2288,8 +2293,8 @@ static void DVUpdateOutputBuffers( DVLocalOutPtr pLocalData )
         // Set up packet header.
         pBuffer = (UInt32 *) pDCLTransferPacket->buffer;
 
-        pBuffer[0] = pGlobalData->fHeader0 | (dbc & 0xFF) | shiftedNodeID;
-        pBuffer[1] = pGlobalData->fHeader1 | 0xFFFF;
+        pBuffer[0] = EndianU32_NtoB( pGlobalData->fHeader0 | (dbc & 0xFF) | shiftedNodeID );
+        pBuffer[1] = EndianU32_NtoB( pGlobalData->fHeader1 | 0xFFFF );
 
         // if not an empty packet
         if (pDCLTransferPacket->size > kDVPacketCIPSize)
@@ -2297,7 +2302,7 @@ static void DVUpdateOutputBuffers( DVLocalOutPtr pLocalData )
             // Set SYT field if this is the first data packet in the frame.
             if (dataPacketNum == 0)
             {
-                pBuffer[1] = pGlobalData->fHeader1 | (syt & 0xFFFF);
+                pBuffer[1] = EndianU32_NtoB( pGlobalData->fHeader1 | (syt & 0xFFFF) );
                 syt = AddFWCycleTimeToFWCycleTime(syt, pGlobalData->nominalFrameCycleTime);
             }
         
@@ -3597,6 +3602,8 @@ static void DVStorePackets(DVLocalInPtr pLocalData)
 	UInt8 fn;
 	UInt8 stype;
 	UInt32 actualModeFrameSize;
+	short syncData;
+	UInt32 cipHeader;
 
 #if TIMING
     CFAbsoluteTime cstart, cend;
@@ -3643,13 +3650,15 @@ static void DVStorePackets(DVLocalInPtr pLocalData)
 			}
 
 			// Check to make sure the signal mode in the CIP header is what we're expecting
-			if (pGlobalData->fStreamVars.fSignalMode != ((*(UInt32 *)(pPacketBuffer+4) >> 16) & 0xff))
+			cipHeader = *(UInt32 *)(pPacketBuffer+4);
+			cipHeader = EndianU32_BtoN( cipHeader );
+			if (pGlobalData->fStreamVars.fSignalMode != ((cipHeader >> 16) & 0xff))
 			{
 				// CIP DV-mode doesn't match the configured mode! To prevent a crash, we
 				// should only store packets if the CIP DV-mode frame-size will
 				// fit into our allocated frame-buffers!
 
-				if (((*(UInt32 *)(pPacketBuffer+4) >> 16) & 0xff) & kAVCSignalModeMask_50)
+				if (((cipHeader >> 16) & 0xff) & kAVCSignalModeMask_50)
 					actualModeFrameSize = kPALNumDataPacketsPerDVFrame * (packetSize-8);
 				else
 					actualModeFrameSize = kNTSCNumDataPacketsPerDVFrame * (packetSize-8);
@@ -3657,7 +3666,7 @@ static void DVStorePackets(DVLocalInPtr pLocalData)
 				if (actualModeFrameSize >  pGlobalData->fStreamVars.fDVFrameSize)
 				{
 					syslog(LOG_INFO, "DVStorePackets (received frame too large for frame-buffer): expected DV mode: %d, actual DV mode: %d\n", 
-						pGlobalData->fStreamVars.fSignalMode, ((*(UInt32 *)(pPacketBuffer+4) >> 16) & 0xff));
+						pGlobalData->fStreamVars.fSignalMode, (cipHeader >> 16) & 0xff);
 					packetSize = 8;
 				}
 			}
@@ -3692,11 +3701,15 @@ static void DVStorePackets(DVLocalInPtr pLocalData)
             // Want size minus CIP header
             packetSize -= 8;
             // detect vSync
-            vSyncDetected = ((*(short *)(pPacketBuffer + 8)  & 0xE0F8 ) == 0x0000 );
+
+           syncData = *(short *)(pPacketBuffer + 8);			  syncData = EndianS16_BtoN(syncData);
+
+		  vSyncDetected = ((syncData & 0xE0F8 ) == 0x0000 );
             if( vSyncDetected ) {
                 // Calculate when Sync arrived.
                 UInt32 frameEnd = SubtractFWCycleTimeFromFWCycleTime(*pLocalData->fTimeStampPtr, (kNumPacketsPerInputBuffer - packetNum) << 12);
                 UInt32 cip2 = *(UInt32 *)(pPacketBuffer+4);
+				cip2 = EndianU32_BtoN( cip2 );
                 pGlobalData->fStreamVars.fSignalMode = (cip2 >> 16) & 0xff;
                 packetPerFrame = (pGlobalData->fStreamVars.fSignalMode & kAVCSignalModeMask_50) ?
                                         kPALNumDataPacketsPerDVFrame : kNTSCNumDataPacketsPerDVFrame;
