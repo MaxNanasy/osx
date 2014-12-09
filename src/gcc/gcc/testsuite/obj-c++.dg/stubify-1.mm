@@ -3,9 +3,10 @@
    _objc_msgSend<end-of-line>" without the $stub suffix.  */
 /* APPLE LOCAL radar 4492976 */
 /* { dg-do compile { target powerpc*-*-darwin* } } */
-/* { dg-options "-Os -mdynamic-no-pic -fno-exceptions" } */
+/* APPLE LOCAL axe stubs 5571540 */
+/* { dg-options "-Os -mdynamic-no-pic -fno-exceptions -mmacosx-version-min=10.4" } */
 /* APPLE LOCAL radar 5061001 */
-/* { dg-skip-if "" { powerpc*-*-darwin* } { "-m64" } { "" } } */
+/* { dg-require-effective-target ilp32 } */
 
 typedef struct objc_object { } *id ;
 int x = 41 ;

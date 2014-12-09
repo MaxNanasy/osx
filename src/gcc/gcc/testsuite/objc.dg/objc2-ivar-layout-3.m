@@ -1,7 +1,8 @@
 /* APPLE LOCAL file radar 5251019 */
 /* Test that we add the number of bytes to skip at tail end of ivar layout. */
-/* { dg-do run { target *-*-darwin* } } */
+/* { dg-do run { target powerpc*-*-darwin* i?86*-*-darwin* } } */
 /* { dg-options "-mmacosx-version-min=10.5 -framework Foundation -fobjc-gc" } */
+/* { dg-require-effective-target objc_gc } */
 
 
 #include <objc/runtime.h>
@@ -20,7 +21,7 @@
 @implementation X_NSKeyValueObservance
 @end
 
-const char expected_strong [] = {0x01, 0x20, 0x01, 0x30, 0};
+const char expected_strong [] = {0x01, 0x21, 0x30, 0};
 const char expected_weak [] = {0x21, 0x40, 0x00};
 
 int main()

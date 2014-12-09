@@ -2,10 +2,11 @@
 /* Any exception usage should generate a warning when  -mmacosx-version-min < 10.3 
 (since use of the feature depends on 10.3 specific API's) */
 /* { dg-options "-mmacosx-version-min=10.2" } */
-/* { dg-do compile } */
+/* APPLE LOCAL radar 5706927 */
+/* { dg-do compile { target powerpc*-*-darwin* } } */
 
 /* APPLE LOCAL begin radar 4894756 */
-/* { dg-skip-if "" { *-*-darwin* } { "-m64" } { "" } } */
+/* { dg-require-effective-target ilp32 } */
 #include "../objc/execute/Object2.h"
 /* APPLE LOCAL end radar 4894756 */
 

@@ -1,7 +1,8 @@
 /* APPLE LOCAL file radar 5082000 */
 /* Test of ivar layour involving array ivars. */
-/* { dg-do run { target *-*-darwin* } } */
+/* { dg-do run { target powerpc*-*-darwin* i?86*-*-darwin* } } */
 /* { dg-options "-mmacosx-version-min=10.5 -framework Foundation -fobjc-gc" } */
+/* { dg-require-effective-target objc_gc } */
 
 #include <objc/runtime.h>
 #include <Foundation/Foundation.h>
@@ -22,7 +23,7 @@ typedef struct _NSAttributeDictionaryElement {
 @implementation NSTableOptions
 @end
 
-const char expected_strong [] = {0x01, 0x30, 0x02, 0};
+const char expected_strong [] = {0x01, 0x32, 0};
 
 int main()
 {

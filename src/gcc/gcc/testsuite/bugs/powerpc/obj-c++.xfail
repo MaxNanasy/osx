@@ -10,8 +10,12 @@
 ### file and make sure the Radar is closed.
 ###
 ###------------------------------------------------------------------
-4239991: obj-c++.dg/gnu-runtime-3.mm (test for excess errors)
+5405050: obj-c++.dg/gnu-runtime-3.mm (test for excess errors)
 #
-# the following failures are for -fstack-protector-all only
-# (G5 only)
-4990353: obj-c++.dg/stubify-1.mm scan-assembler-not \\$non_lazy_ptr
+# the following fail with -m64 only 
+#
+# the following fail for x86
+#
+# the following fail for x86 with -m64 only
+#
+# the following fail for -mmacosx-version-min=10.5 only

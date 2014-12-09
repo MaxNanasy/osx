@@ -3,15 +3,17 @@
 /* Program should compile with no error or warning. */
 /* { dg-do compile { target *-*-darwin* } } */
 /* APPLE LOCAL radar 4899595 */
-/* { dg-options "-fno-objc-new-property -mmacosx-version-min=10.5 -fobjc-abi-version=2" } */
+/* { dg-options "-mmacosx-version-min=10.5" { target *-*-darwin* } } */
+/* { dg-skip-if "" { arm*-*-darwin* } { "*" } { "" } } */
 #import <Cocoa/Cocoa.h>
 
 @interface NSWindow (Properties)
 @property(readonly) NSSize size;
-@property(bycopy, dynamic) NSString* title;
+@property(copy) NSString* title;
 @end
 
 @implementation NSWindow (Properties)
+@dynamic title;
 
 - (NSSize)size {
     return _frame.size;
