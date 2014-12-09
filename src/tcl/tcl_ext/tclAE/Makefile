@@ -29,4 +29,8 @@ install-doc:
 	$(_v) $(INSTALL_FILE) "$(Docs)"/style/* "$(DSTROOT)/$(TclExtHtmlDir)"/style
 
 kill-appledouble:
-	-rm -f $(DSTROOT)/System/Library/Tcl/._tclAE2.0
+#	~fs/bin/xattrutil remove -a $(DSTROOT)/System/Library/Tcl/tclAE2.0
+	mkdir $(DSTROOT)/System/Library/Tcl/tclAE2.0.foo
+	mv $(DSTROOT)/System/Library/Tcl/tclAE2.0/* $(DSTROOT)/System/Library/Tcl/tclAE2.0.foo
+	rm -rf $(DSTROOT)/System/Library/Tcl/tclAE2.0
+	mv $(DSTROOT)/System/Library/Tcl/tclAE2.0.foo $(DSTROOT)/System/Library/Tcl/tclAE2.0

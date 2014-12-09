@@ -24,6 +24,17 @@ CXX                   = g++-4.0
 
 Install_Target        = install-tcl
 
+# patch config.h
+ConfigStamp2 = $(ConfigStamp)2
+
+configure:: $(ConfigStamp2)
+
+$(ConfigStamp2): $(ConfigStamp)
+	cp $(BuildDirectory)/config.h $(BuildDirectory)/config.h.bak
+	$(_v) ed - $(BuildDirectory)/config.h < $(SRCROOT)/config.h.ed
+	$(_v) $(TOUCH) $(ConfigStamp2)
+	cp $(SRCROOT)/Mk4tcl.exports $(BuildDirectory)/../
+
 install-doc:
 	$(_v) $(INSTALL_DIRECTORY) "$(DSTROOT)/$(TclExtHtmlDir)"
 	$(_v) $(INSTALL_FILE) "$(Sources)"/doc/tcl.html \

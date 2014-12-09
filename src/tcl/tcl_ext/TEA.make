@@ -97,6 +97,8 @@ XcodeBuild            = cd $(Sources) && $(XCODEBUILD) -configuration Deployment
 
 build::
 	@echo "Building $(Project)..."
+	$(_v) $(MKDIR) $(OBJROOT)/Deployment.build/$(ProjectName).build
+	$(_v) $(LN) -fs -fs Deployment.build/$(ProjectName).build $(OBJROOT)/$(ProjectName).build
 	$(_v) $(XcodeBuild)
 
 install:: build

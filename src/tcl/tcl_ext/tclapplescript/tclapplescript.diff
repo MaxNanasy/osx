@@ -1,24 +1,15 @@
 --- TclAppleScript.pbproj/project.pbxproj.orig	2004-05-05 23:34:06.000000000 -0700
-+++ TclAppleScript.pbproj/project.pbxproj	2005-10-24 19:40:00.000000000 -0700
-@@ -96,7 +96,6 @@
- 			buildRules = (
- 			);
- 			buildSettings = {
--				TEMP_DIR = "${OBJROOT}/Development.build/$(PROJECT_NAME).build/$(TARGET_NAME).build";
- 				UNSTRIPPED_PRODUCT = YES;
- 			};
- 			isa = PBXBuildStyle;
-@@ -107,8 +106,7 @@
++++ TclAppleScript.pbproj/project.pbxproj	2005-06-20 22:51:05.000000000 -0700
+@@ -107,7 +107,7 @@
  			);
  			buildSettings = {
  				DEBUGGING_SYMBOLS = NO;
 -				OPTIMIZATION_CFLAGS = "-Os -mcpu=750";
--				TEMP_DIR = "${OBJROOT}/Deployment.build/$(PROJECT_NAME).build/$(TARGET_NAME).build";
 +				OPTIMIZATION_CFLAGS = "-Os";
+ 				TEMP_DIR = "${OBJROOT}/Deployment.build/$(PROJECT_NAME).build/$(TARGET_NAME).build";
  			};
  			isa = PBXBuildStyle;
- 			name = Deployment;
-@@ -138,7 +136,6 @@
+@@ -138,7 +138,6 @@
  			buildActionMask = 2147483647;
  			files = (
  				F5509190036C35B40130931B,
@@ -26,7 +17,7 @@
  			);
  			isa = PBXFrameworksBuildPhase;
  			runOnlyForDeploymentPostprocessing = 0;
-@@ -151,14 +148,14 @@
+@@ -151,14 +150,14 @@
  				F96B6BDB0420C430006F146B,
  			);
  			buildSettings = {
@@ -44,7 +35,7 @@
  				GLOBAL_CFLAGS = "-include TclAS_CarbonMachO.pch";
  				HEADER_SEARCH_PATHS = "";
  				INSTALL_PATH = "/Library/Tcl/Tclapplescript${DYLIB_CURRENT_VERSION}";
-@@ -167,7 +164,7 @@
+@@ -167,7 +166,7 @@
  				MANDIR = /Library/Tcl/man;
  				OPTIMIZATION_CFLAGS = "-O0";
  				OTHER_CFLAGS = "";
@@ -53,7 +44,7 @@
  				OTHER_LIBTOOL_FLAGS = "";
  				OTHER_REZFLAGS = "";
  				PRECOMPILE_PREFIX_HEADER = NO;
-@@ -202,12 +199,6 @@
+@@ -202,12 +201,6 @@
  			path = /Library/Frameworks/Tcl.framework/libtclstub8.4.a;
  			refType = 0;
  		};
