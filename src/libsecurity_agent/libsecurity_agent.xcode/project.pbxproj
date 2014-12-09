@@ -670,7 +670,7 @@
 			);
 			buildSettings = {
 				BUILD_VARIANTS = "normal debug nopic";
-				CURRENT_PROJECT_VERSION = 24739;
+				CURRENT_PROJECT_VERSION = 28481;
 				FRAMEWORK_SEARCH_PATHS = /usr/local/SecurityPieces/Frameworks;
 				LIBRARY_STYLE = STATIC;
 				OPT_CFLAGS = "-DNDEBUG -Os $(OPT_INLINEFLAGS)";
@@ -736,7 +736,7 @@
 			);
 			buildSettings = {
 				BUILD_VARIANTS = "normal debug nopic";
-				CURRENT_PROJECT_VERSION = 24739;
+				CURRENT_PROJECT_VERSION = 28481;
 				FRAMEWORK_SEARCH_PATHS = /usr/local/SecurityPieces/Frameworks;
 				LIBRARY_STYLE = STATIC;
 				OPT_CFLAGS = "-DNDEBUG -Os $(OPT_INLINEFLAGS)";
