@@ -1559,7 +1559,8 @@ static LONG SCardTransmitTH(SCARDHANDLE hCard, LPCSCARD_IO_REQUEST pioSendPci,
 	request.hCard = htonl(hCard);
 	request.header.additional_data_size = cbSendLength;
 	request.cbMaxRecvLength = htonl(*pcbRecvLength);
-	memcpy(&request.pioSendPci, pioSendPci, sizeof(SCARD_IO_REQUEST));
+	request.pioSendPci.dwProtocol = htonl(pioSendPci->dwProtocol);
+	request.pioSendPci.cbPciLength = htonl(pioSendPci->cbPciLength);
 
 	rv = MSGClientSendRequest(SCARD_TRANSMIT,
 		PCSCLITE_CLIENT_ATTEMPTS, &request, sizeof(request), pbSendBuffer,
@@ -1589,6 +1590,8 @@ static LONG SCardTransmitTH(SCARDHANDLE hCard, LPCSCARD_IO_REQUEST pioSendPci,
 
 	if (pioRecvPci)
 	{
+		reply.pioRecvPci.dwProtocol = ntohl(reply.pioRecvPci.dwProtocol);
+		reply.pioRecvPci.cbPciLength = ntohl(reply.pioRecvPci.cbPciLength);
 		memcpy(pioRecvPci, &reply.pioRecvPci, sizeof(SCARD_IO_REQUEST));
 	}
 

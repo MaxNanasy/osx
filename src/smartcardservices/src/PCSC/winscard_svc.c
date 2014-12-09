@@ -802,6 +802,8 @@ void MSGFixByteOrder(request_object *requestObj)
 		if (requestObj->message.header.size == sizeof(transmit_request))
 		{
 			requestObj->message.transmit.hCard = ntohl(requestObj->message.transmit.hCard);
+			requestObj->message.transmit.pioSendPci.dwProtocol = ntohl(requestObj->message.transmit.pioSendPci.dwProtocol);
+			requestObj->message.transmit.pioSendPci.cbPciLength = ntohl(requestObj->message.transmit.pioSendPci.cbPciLength);
 			requestObj->message.transmit.cbMaxRecvLength = ntohl(requestObj->message.transmit.cbMaxRecvLength);
 		}
 		break;
