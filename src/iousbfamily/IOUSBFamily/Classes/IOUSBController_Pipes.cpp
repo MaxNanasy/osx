@@ -33,6 +33,9 @@
 #define super IOUSBBus
 #define self this
 
+#define _freeUSBCommandPool				_expansionData->freeUSBCommandPool
+#define _freeUSBIsocCommandPool			_expansionData->freeUSBIsocCommandPool
+
 #define CONTROLLER_PIPES_USE_KPRINTF 0
 
 #if CONTROLLER_PIPES_USE_KPRINTF
@@ -595,7 +598,7 @@ IOUSBController::Write(IOMemoryDescriptor *buffer, USBDeviceAddress address, End
 			nullCompletion = command->GetDisjointCompletion();
 			if (nullCompletion.action)
 			{
-				USBLog(1, "%s[%p]::Write - SYNC xfer or immediate error with Disjoint Completion", getName(), this);
+				USBLog(2, "%s[%p]::Write - SYNC xfer or immediate error with Disjoint Completion", getName(), this);
 			}
 			if (memDesc)
 			{

@@ -71,14 +71,14 @@ static ErrataListEntry  errataList[] = {
 	{0x8086, 0x27CA, 0x00, 0xff, kErrataICH6PowerSequencing | kErrataUHCISupportsOvercurrent | kErrataNeedsOvercurrentDebounce | kErrataSupportsPortResumeEnable },	// ICH7 UHCI #3
 	{0x8086, 0x27CB, 0x00, 0xff, kErrataICH6PowerSequencing | kErrataUHCISupportsOvercurrent | kErrataNeedsOvercurrentDebounce | kErrataSupportsPortResumeEnable },	// ICH7 UHCI #4
 	{0x8086, 0x27CC, 0x00, 0xff, kErrataICH6PowerSequencing | kErrataICH7ISTBuffer  | kErrataNeedsOvercurrentDebounce },			// ICH7 EHCI
-		
+
 	{0x8086, 0x2830, 0x00, 0xff, kErrataICH6PowerSequencing | kErrataUHCISupportsOvercurrent | kErrataNeedsOvercurrentDebounce | kErrataSupportsPortResumeEnable },   // ICH8 UHCI #1
 	{0x8086, 0x2831, 0x00, 0xff, kErrataICH6PowerSequencing | kErrataUHCISupportsOvercurrent | kErrataNeedsOvercurrentDebounce | kErrataSupportsPortResumeEnable },   // ICH8 UHCI #2
 	{0x8086, 0x2832, 0x00, 0xff, kErrataICH6PowerSequencing | kErrataUHCISupportsOvercurrent | kErrataNeedsOvercurrentDebounce | kErrataSupportsPortResumeEnable },   // ICH8 UHCI #3
 	{0x8086, 0x2834, 0x00, 0xff, kErrataICH6PowerSequencing | kErrataUHCISupportsOvercurrent | kErrataNeedsOvercurrentDebounce | kErrataSupportsPortResumeEnable },   // ICH8 UHCI #4
 	{0x8086, 0x2835, 0x00, 0xff, kErrataICH6PowerSequencing | kErrataUHCISupportsOvercurrent | kErrataNeedsOvercurrentDebounce | kErrataSupportsPortResumeEnable },   // ICH8 UHCI #5
-	{0x8086, 0x2836, 0x00, 0xff, kErrataICH6PowerSequencing | kErrataICH7ISTBuffer  | kErrataNeedsOvercurrentDebounce },			// ICH8 EHCI #1
-	{0x8086, 0x283a, 0x00, 0xff, kErrataICH6PowerSequencing | kErrataICH7ISTBuffer  | kErrataNeedsOvercurrentDebounce }				// ICH8 EHCI #2
+	{0x8086, 0x2836, 0x00, 0xff, kErrataICH6PowerSequencing | kErrataNeedsOvercurrentDebounce },			// ICH8 EHCI #1
+	{0x8086, 0x283a, 0x00, 0xff, kErrataICH6PowerSequencing | kErrataNeedsOvercurrentDebounce }				// ICH8 EHCI #2
 };
 
 #define errataListLength (sizeof(errataList)/sizeof(ErrataListEntry))

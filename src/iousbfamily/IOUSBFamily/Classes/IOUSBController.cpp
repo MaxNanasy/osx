@@ -42,6 +42,7 @@
 
 #include <IOKit/usb/IOUSBController.h>
 #include <IOKit/usb/IOUSBControllerV2.h>
+#include <IOKit/usb/IOUSBControllerV3.h>
 #include <IOKit/usb/IOUSBDevice.h>
 #include <IOKit/usb/USBSpec.h>
 #include <IOKit/usb/IOUSBRootHubDevice.h>
@@ -69,7 +70,7 @@
 #undef USBError
 void kprintf(const char *format, ...)
 __attribute__((format(printf, 1, 2)));
-#define USBLog( LEVEL, FORMAT, ARGS... )  if ((LEVEL) <= 3) { kprintf( FORMAT "\n", ## ARGS ) ; }
+#define USBLog( LEVEL, FORMAT, ARGS... )  if ((LEVEL) <= CONTROLLER_USE_KPRINTF) { kprintf( FORMAT "\n", ## ARGS ) ; }
 #define USBError( LEVEL, FORMAT, ARGS... )  { kprintf( FORMAT "\n", ## ARGS ) ; }
 #endif
 
@@ -103,9 +104,10 @@ typedef struct IOUSBSyncCompletionTarget IOUSBSyncCompletionTarget;
 //   Globals (static member variables)
 //
 //================================================================================================
-#define kUSBSetup				kUSBNone
-#define kUSBBusID				"AAPL,bus-id"
-#define	kMaxNumberUSBBusses		256
+#define kUSBSetup 		kUSBNone
+#define kAppleCurrentAvailable	"AAPL,current-available"
+#define kUSBBusID		"AAPL,bus-id"
+#define	kMaxNumberUSBBusses	256
 
 // These are really a static member variable (system wide global)
 //
@@ -114,6 +116,20 @@ const IORegistryPlane *		IOUSBController::gIOUSBPlane = 0;
 UInt32						IOUSBController::_busCount;
 bool						IOUSBController::gUsedBusIDs[kMaxNumberUSBBusses];
 
+#define _freeUSBCommandPool				_expansionData->freeUSBCommandPool
+#define _freeUSBIsocCommandPool			_expansionData->freeUSBIsocCommandPool
+#define _watchdogUSBTimer				_expansionData->watchdogUSBTimer
+#define _controllerTerminating			_expansionData->_terminating
+#define _watchdogTimerActive			_expansionData->_watchdogTimerActive
+#define _pcCardEjected					_expansionData->_pcCardEjected
+#define _busNumber						_expansionData->_busNumber
+#define _currentSizeOfCommandPool		_expansionData->_currentSizeOfCommandPool
+#define _currentSizeOfIsocCommandPool	_expansionData->_currentSizeOfIsocCommandPool
+#define _controllerSpeed				_expansionData->_controllerSpeed
+#define _terminatePCCardThread			_expansionData->_terminatePCCardThread
+#define _addressPending					_expansionData->_addressPending
+#define _provider						_expansionData->_provider
+#define _controllerCanSleep				_expansionData->_controllerCanSleep
 
 //================================================================================================
 //
@@ -245,19 +261,26 @@ IOUSBController::start( IOService * provider )
     IOReturn				err = kIOReturnSuccess;
 	bool					commandGateAdded = false;
 	IOUSBControllerV2		*me2 = OSDynamicCast(IOUSBControllerV2, this);
+	IOUSBControllerV3		*me3 = OSDynamicCast(IOUSBControllerV3, this);
     
     if( !super::start(provider))
-        return (false);
+        return false;
+	
+	_provider = provider;
+	if (!_provider || !_provider->open(this))
+	{
+		return false;
+	}
+	
+	if (!_log)
+		_log = IOUSBLog::usblog();
 	
     do {
-		
-        if (!_log)
-            _log = IOUSBLog::usblog();
 		
         /*
          * Initialize the Workloop and Command gate
          */
-        _workLoop = IOUSBWorkLoop::workLoop();
+        _workLoop = IOUSBWorkLoop::workLoop(provider->getLocation());
         if (!_workLoop)
         {
             USBError(1,"%s: unable to create workloop", getName());
@@ -317,20 +340,23 @@ IOUSBController::start( IOService * provider )
         {
             _addressPending[i] = false;
         }
-		        
+		
         PMinit();
-        provider->joinPMtree(this);
+        _provider->joinPMtree(this);
 		//        IOPMRegisterDevice(pm_vars->ourName,this);	// join the power management tree
         
         /*
          * Initialize the UIM
          */
-        if (UIMInitialize(provider) != kIOReturnSuccess)
+        if (UIMInitialize(_provider) != kIOReturnSuccess)
         {
             USBError(1,"%s: unable to initialize UIM", getName());
             break;
         }
 		
+		// Enable the interrupt delivery.
+		_workLoop->enableAllInterrupts();
+
         // allocate 50 (kSizeOfCommandPool) commands of each type
         //
 		for (i=0; i < kSizeOfCommandPool; i++)
@@ -356,7 +382,7 @@ IOUSBController::start( IOService * provider )
 			}
         }
         _currentSizeOfIsocCommandPool = kSizeOfIsocCommandPool;
-
+        
         /*
          * Initialize device zero
          */
@@ -368,15 +394,20 @@ IOUSBController::start( IOService * provider )
             if ( gIOUSBPlane == 0 )
                 USBError(1,"IOUSBController::start unable to create IOUSB plane");
         }
+
+		if (!me3)
+		{
+			USBLog(2, "%s[%p]::start - calling CreateRootHubDevice for non V3 controller", getName(), this);
+			err = CreateRootHubDevice( _provider, &_rootHubDevice );
+			USBLog(2, "%s[%p]::start - called CreateRootHubDevice - return(%p)", getName(), this, (void*)err);
+			if ( err != kIOReturnSuccess )
+				break;
+			makeUsable();
+			// Match a driver for the rootHubDevice
+			//
+			_rootHubDevice->registerService();
+		}
 		
-        err = CreateRootHubDevice( provider, &_rootHubDevice );
-        if ( err != kIOReturnSuccess )
-            break;
-        
-        // Match a driver for the rootHubDevice
-        //
-        _rootHubDevice->registerService();
-        
         _watchdogTimerActive = true;
         _watchdogUSBTimer->setTimeoutMS(kUSBWatchdogTimeoutMS);
         
@@ -399,6 +430,8 @@ IOUSBController::start( IOService * provider )
 		_workLoop = NULL;
 	}
 	
+	_provider->close(this);
+
     return( false );
 }
 
@@ -421,9 +454,9 @@ IOUSBController::getWorkLoop() const
 IOReturn 
 IOUSBController::CreateDevice(	IOUSBDevice 		*newDevice,
                                 USBDeviceAddress	deviceAddress,
-                                UInt8		 	maxPacketSize,
-                                UInt8			speed,
-                                UInt32			powerAvailable)
+                                UInt8				maxPacketSize,
+                                UInt8				speed,
+                                UInt32				powerAvailable)
 {
 	
     USBLog(5,"%s[%p]::CreateDevice: addr=%d, speed=%s, power=%d", getName(), this,
@@ -451,7 +484,7 @@ IOUSBController::CreateDevice(	IOUSBDevice 		*newDevice,
             break;
         }
 		
-        USBLog(2, "%s[%p]::CreateDevice - releasing pend on address %d", getName(), this, deviceAddress);
+        USBLog(7, "%s[%p]::CreateDevice - releasing pend on address %d", getName(), this, deviceAddress);
         _addressPending[deviceAddress] = false;
 		
         return(kIOReturnSuccess);
@@ -620,7 +653,7 @@ IOUSBController::ControlTransaction(IOUSBCommand *command)
             if (err)
             {
                 char theString[255]="";
-                sprintf(theString, "ControlTransaction: control packet 2 error 0x%x", err);
+                snprintf(theString, sizeof(theString), "ControlTransaction: control packet 2 error 0x%x", err);
                 // panic(theString);
           //      {USBError(1, theString);}
                 break;
@@ -645,7 +678,7 @@ IOUSBController::ControlTransaction(IOUSBCommand *command)
         if (err)
         {
             char theString[255]="";
-            sprintf(theString, "%s[%p]::ControlTransaction: control packet 3 error 0x%x", getName(), this, err);
+            snprintf(theString, sizeof(theString), "%s[%p]::ControlTransaction: control packet 3 error 0x%x", getName(), this, err);
            //  { USBError(1, theString);}
             break;
         }
@@ -691,7 +724,9 @@ IOUSBController::ControlPacketHandler( OSObject * 	target,
     todo = sent ^ back; /* thats xor */
 	
     if ( status != kIOReturnSuccess )
+	{
         USBLog(5, "%s[%p]::ControlPacketHandler(FN: %d, EP:%d): Error: 0x%x, stage: 0x%x, todo: 0x%x", me->getName(), me, command->GetAddress(), command->GetEndpoint(), status, command->GetStage(), todo );
+	}
 	
     if((todo & kSetupBack) != 0)
         command->SetStage(command->GetStage() | kSetupBack);
@@ -708,7 +743,9 @@ IOUSBController::ControlPacketHandler( OSObject * 	target,
 		in = (((request->bmRequestType >> kUSBRqDirnShift) & kUSBRqDirnMask) != kUSBIn);
     }
     else
+	{
         USBLog(5,"%s[%p]::ControlPacketHandler: Spare transactions, This seems to be harmless", me->getName(), me);
+	}
 	
     back = command->GetStage() & 0xf0;
     todo = sent ^ back; /* thats xor */
@@ -825,8 +862,9 @@ IOUSBController::ControlPacketHandler( OSObject * 	target,
 		}
     }
     else
+	{
         USBLog(7,"%s[%p]::ControlPacketHandler: still more to come: todo=0x%x", me->getName(), me, todo);
-	
+	}
 }
 
 
@@ -936,7 +974,9 @@ IOUSBController::BulkTransaction(IOUSBCommand *command)
     err = UIMCreateBulkTransfer(command);
 	
     if (err)
+	{
         USBLog(3,"%s[%p]::BulkTransaction: error queueing bulk packet (0x%x)", getName(), this, err);
+	}
 	
     return(err);
 }
@@ -1170,7 +1210,8 @@ void
 IOUSBController::WatchdogTimer(OSObject *target, IOTimerEventSource *source)
 {
     IOUSBController*	me = OSDynamicCast(IOUSBController, target);
-    IOReturn		err;
+    IOUSBControllerV2*	me2 = OSDynamicCast(IOUSBControllerV2, target);
+    IOReturn			err;
 	
     if (!me || !source || me->isInactive() || me->_pcCardEjected )
     {
@@ -1188,6 +1229,25 @@ IOUSBController::WatchdogTimer(OSObject *target, IOTimerEventSource *source)
     else
     {
         me->UIMCheckForTimeouts();
+		if (me2)
+		{
+			UInt64			frameNumber;
+			AbsoluteTime	frameTime;
+			IOReturn		frameRet;
+			UInt64			timeInMicS;
+			
+			frameRet = me2->GetFrameNumberWithTime(&frameNumber, &frameTime);
+			if (!frameRet)
+			{
+				absolutetime_to_nanoseconds(frameTime, &timeInMicS);
+				timeInMicS /= 1000;				// Convert to microseconds from nanoseconds
+				USBLog(7, "%s[%p]::WatchdogTimer - GetFrameNumberWithTime returned frame [%Ld] at time [%Ld]", me2->getName(), me2, frameNumber, timeInMicS);
+			}
+			else
+			{
+				USBLog(7, "%s[%p]::WatchdogTimer - GetFrameNumberWithTime returned error %p", me2->getName(), me2, (void*)frameRet);
+			}
+		}
     }
     
 }
@@ -1334,7 +1394,7 @@ IOUSBController::DoIOTransfer(OSObject *owner, void *cmd, void *, void *, void *
     {
         // prior to 1.8.3f5, we would call the completion routine here. that seems
         // a mistake, so we don't do it any more
-        USBLog(2, "%s[%p]::DoIOTransfer - error 0x%x queueing request", controller->getName(), controller, err);
+        USBLog(2, "%s[%p]::DoIOTransfer - error %s (0x%x) queueing request (Bus: 0x%lx, Addr: %d, EP: %d  Direction: %d, Type: %d)", controller->getName(), controller, USBErrorToString(err), err, controller->_busNumber, command->GetAddress(), command->GetEndpoint(), command->GetDirection(), command->GetType() );
     }
 	
     return err;
@@ -1538,7 +1598,9 @@ IOUSBController::ProtectedDevZeroLock(OSObject *target, void* lock, void* arg2, 
 		{
 			commandGate->commandSleep(&me->_devZeroLock, THREAD_UNINT);
 			if (me->_devZeroLock)
+			{
 				USBLog(5, "%s[%p]::ProtectedAcquireDevZeroLock - _devZeroLock still held - back to sleep", me->getName(), me);
+			}
 		}
 		me->_devZeroLock = true;
 		return kIOReturnSuccess;
@@ -1744,7 +1806,43 @@ IOUSBController::MakeDevice(USBDeviceAddress *	address)
 		return NULL;
     }
 	
-    return(newDev);
+    return newDev;
+}
+
+
+
+IOUSBHubDevice *
+IOUSBController::MakeHubDevice(USBDeviceAddress *	address)
+{
+    IOReturn			err = kIOReturnSuccess;
+    IOUSBHubDevice		*newDev;
+	
+    USBLog(6, "%s[%p]::MakeHubDevice", getName(), this);
+	
+    newDev = IOUSBHubDevice::NewHubDevice();
+    
+    if (newDev == NULL)
+        return NULL;
+	
+    *address = GetNewAddress();
+    if(*address == 0) 
+    {
+        USBLog(1, "%s[%p]::MakeHubDevice error getting address - releasing newDev", getName(), this);
+		newDev->release();
+		return NULL;
+    }
+	
+    err = SetDeviceZeroAddress(*address);
+    
+    if (err)
+    {
+        USBLog(1, "%s[%p]::MakeHubDevice error setting address. err=0x%x device=%p - releasing device", getName(), this, err, newDev);
+        *address = 0;
+		newDev->release();
+		return NULL;
+    }
+	
+    return newDev;
 }
 
 
@@ -1907,8 +2005,6 @@ IOUSBController::stop( IOService * provider )
         thread_call_free(_terminatePCCardThread);
     }
 	
-    // Remove our workloop related stuff
-    //
     if ( _freeUSBCommandPool )
     {
         _freeUSBCommandPool->release();
@@ -1920,30 +2016,20 @@ IOUSBController::stop( IOService * provider )
         _freeUSBIsocCommandPool->release();
         _freeUSBIsocCommandPool = NULL;
     }
-    if ( _watchdogUSBTimer )
+    
+	if ( _watchdogUSBTimer )
     {
 		_watchdogUSBTimer->cancelTimeout();
 		
-        if ( _workLoop )
-			_workLoop->removeEventSource( _watchdogUSBTimer );
-       
-		_watchdogUSBTimer->release();
-        _watchdogUSBTimer = NULL;
-    }
-	
-    if ( _commandGate )
-    {
 		if ( _workLoop )
-			_workLoop->removeEventSource( _commandGate );
-        _commandGate->release();
-        _commandGate = NULL;
+			_workLoop->removeEventSource( _watchdogUSBTimer );
     }
 	
-    if ( _workLoop )
-    {
-        _workLoop->release();
-        _workLoop = NULL;
-    }
+	
+	if ( _workLoop && _commandGate)
+		_workLoop->removeEventSource( _commandGate );
+
+	_provider->close(this);
 	
     USBLog(5,"-%s[%p]::stop (0x%lx)", getName(), this, (UInt32) provider);
     
@@ -2049,7 +2135,9 @@ IOUSBController::TerminatePCCard(OSObject *target)
     USBLog(5,"%s[%p]::TerminatePCCard Terminating RootHub", me->getName(),me);
     ok = me->_rootHubDevice->terminate(kIOServiceRequired | kIOServiceSynchronous);
     if ( !ok )
+	{
         USBLog(3,"%s[%p]::TerminatePCCard Could not terminate RootHub device", me->getName(), me);
+	}
     
     me->_rootHubDevice->detachAll(gIOUSBPlane);
     me->_rootHubDevice->release();
@@ -2597,7 +2685,27 @@ OSMetaClassDefineReservedUsed(IOUSBController,  9);
 void
 IOUSBController::free()
 {
-    //  This needs to be the LAST thing we do, as it disposes of our "fake" member
+    // Release our workloop related stuff
+    //
+	if ( _watchdogUSBTimer )
+	{
+        _watchdogUSBTimer->release();
+        _watchdogUSBTimer = NULL;
+	}
+	
+	if ( _commandGate )
+    {
+        _commandGate->release();
+        _commandGate = NULL;
+    }
+	
+    if ( _workLoop )
+    {
+        _workLoop->release();
+        _workLoop = NULL;
+    }
+	
+	//  This needs to be the LAST thing we do, as it disposes of our "fake" member
     //  variables.
     //
     if (_expansionData)
@@ -2714,21 +2822,30 @@ IOUSBController::CreateRootHubDevice( IOService * provider, IOUSBRootHubDevice *
     (*rootHubDevice)->setLocation(provider->getLocation());
     (*rootHubDevice)->setLocation(provider->getLocation(), gIOUSBPlane);
 	
-	
     // 2505931 If the provider has an APPL,current-available property, then stick it in the new root hub device
     //
     appleCurrentProperty = provider->getProperty(kAppleCurrentAvailable);
     if (appleCurrentProperty)
         (*rootHubDevice)->setProperty(kAppleCurrentAvailable, appleCurrentProperty);
-
+	
 	// 5187893 - do the same for these other two properties
     appleCurrentProperty = provider->getProperty(kAppleCurrentInSleep);
     if (appleCurrentProperty)
         (*rootHubDevice)->setProperty(kAppleCurrentInSleep, appleCurrentProperty);
-
+	
     appleCurrentProperty = provider->getProperty(kAppleCurrentExtra);
     if (appleCurrentProperty)
         (*rootHubDevice)->setProperty(kAppleCurrentExtra, appleCurrentProperty);
+
+	if (_controllerCanSleep)
+	{
+		USBLog(2, "IOUSBController[%p]::CreateRootHubDevice - controller (%s) can sleep, setting characteristic in root hub (%p)", this, getName(), rootHubDevice);
+		(*rootHubDevice)->SetHubCharacteristics((*rootHubDevice)->GetHubCharacteristics() | kIOUSBHubDeviceCanSleep);
+	}
+	else
+	{
+		USBLog(1, "IOUSBController[%p]::CreateRootHubDevice - controller (%s) does not support sleep, NOT setting characteristic in root hub (%p)", this, getName(), rootHubDevice);
+	}
 	
 ErrorExit:
 		
@@ -2824,4 +2941,110 @@ IOUSBController::UIMCreateIsochTransfer(IOUSBIsocCommand *command)
 
 
 OSMetaClassDefineReservedUnused(IOUSBController,  19);
+
+//================================================================================================
+//
+//	USBErrorToString
+//
+//	Translates an USB/IOKit error into a string for easier understanding
+//
+//================================================================================================
+//
+const char *
+IOUSBController::USBErrorToString(IOReturn status)
+{
+    switch (status) {
+	case kIOReturnSuccess:
+		return "kIOReturnSuccess";
+	case kIOReturnError:
+		return "kIOReturnError";
+	case kIOReturnNotResponding:
+		return "kIOReturnNotResponding";
+	case kIOUSBPipeStalled:
+		return "kIOUSBPipeStalled";
+	case kIOReturnOverrun:
+		return "kIOReturnOverrun";
+	case kIOReturnUnderrun:
+		return "kIOReturnUnderrun";
+	case kIOReturnExclusiveAccess:
+		return "kIOReturnExclusiveAccess";
+	case kIOUSBTransactionReturned:
+		return "kIOUSBTransactionReturned";
+	case kIOReturnAborted:
+		return "kIOReturnAborted";
+	case kIOReturnIsoTooNew:
+		return "kIOReturnIsoTooNew";
+	case kIOReturnIsoTooOld:
+		return "kIOReturnIsoTooOld";
+	case kIOReturnNoDevice:
+		return "kIOReturnNoDevice";
+	case kIOReturnBadArgument:
+		return "kIOReturnBadArgument";
+	case kIOReturnInternalError:
+		return "kIOReturnInternalError";
+	case kIOReturnNoMemory:
+		return "kIOReturnNoMemory";
+	case kIOReturnUnsupported:
+		return "kIOReturnUnsupported";
+	case kIOReturnNoResources:
+		return "kIOReturnNoResources";
+	case kIOReturnNoBandwidth:
+		return "kIOReturnNoBandwidth";
+	case kIOReturnIPCError:
+		return "kIOReturnIPCError";
+	case kIOReturnTimeout:
+		return "kIOReturnTimeout";
+	case kIOReturnBusy:
+		return "kIOReturnBusy";
+	case kIOUSBUnknownPipeErr:
+		return "kIOUSBUnknownPipeErr";
+	case kIOUSBTooManyPipesErr:
+		return "kIOUSBTooManyPipesErr";
+	case kIOUSBNoAsyncPortErr:
+		return "kIOUSBNoAsyncPortErr";
+	case kIOUSBNotEnoughPipesErr:
+		return "kIOUSBNotEnoughPipesErr";
+	case kIOUSBNotEnoughPowerErr:
+		return "kIOUSBNotEnoughPowerErr";
+	case kIOUSBEndpointNotFound:
+		return "kIOUSBEndpointNotFound";
+	case kIOUSBConfigNotFound:
+		return "kIOUSBConfigNotFound";
+	case kIOUSBTransactionTimeout:
+		return "kIOUSBTransactionTimeout";
+	case kIOUSBLowLatencyBufferNotPreviouslyAllocated:
+		return "kIOUSBLowLatencyBufferNotPreviouslyAllocated";
+	case kIOUSBLowLatencyFrameListNotPreviouslyAllocated:
+		return "kIOUSBLowLatencyFrameListNotPreviouslyAllocated";
+	case kIOUSBHighSpeedSplitError:
+		return "kIOUSBHighSpeedSplitError";
+	case kIOUSBSyncRequestOnWLThread:
+		return "kIOUSBSyncRequestOnWLThread";
+	case kIOUSBLinkErr:
+		return "kIOUSBLinkErr";
+	case kIOUSBCRCErr:
+		return "kIOUSBCRCErr";
+	case kIOUSBNotSent1Err:
+		return "kIOUSBNotSent1Err";
+	case kIOUSBNotSent2Err:
+		return "kIOUSBNotSent2Err";
+	case kIOUSBBufferUnderrunErr:
+		return "kIOUSBBufferUnderrunErr";
+	case kIOUSBBufferOverrunErr:
+		return "kIOUSBBufferOverrunErr";
+	case kIOUSBReserved2Err:
+		return "kIOUSBReserved2Err";
+	case kIOUSBReserved1Err:
+		return "kIOUSBReserved1Err";
+	case kIOUSBWrongPIDErr:
+		return "kIOUSBWrongPIDErr";
+	case kIOUSBPIDCheckErr:
+		return "kIOUSBPIDCheckErr";
+	case kIOUSBDataToggleErr:
+		return "kIOUSBDataToggleErr";
+	case kIOUSBBitstufErr:
+		return "kIOUSBBitstufErr";
+    }
+    return "Unknown";
+}
 

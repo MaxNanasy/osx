@@ -448,16 +448,16 @@ enum
 
 
 enum {
-    kOHCIBulkTransferOutType		= 1,
-    kOHCIBulkTransferInType		= 2,
-    kOHCIControlSetupType		= 3,
-    kOHCIControlDataType		= 4,
-    kOHCIControlStatusType 		= 5,
-    kOHCIInterruptInType		= 6,
-    kOHCIInterruptOutType		= 7,
-    kOHCIOptiLSBug			= 8,
-    kOHCIIsochronousInType		= 9,
-    kOHCIIsochronousOutType		= 10,
+    kOHCIBulkTransferOutType			= 1,
+    kOHCIBulkTransferInType				= 2,
+    kOHCIControlSetupType				= 3,
+    kOHCIControlDataType				= 4,
+    kOHCIControlStatusType				= 5,
+    kOHCIInterruptInType				= 6,
+    kOHCIInterruptOutType				= 7,
+    kOHCIOptiLSBug						= 8,
+    kOHCIIsochronousInType				= 9,
+    kOHCIIsochronousOutType				= 10,
     kOHCIIsochronousInLowLatencyType	= 11,
     kOHCIIsochronousOutLowLatencyType	= 12
 };
@@ -508,3 +508,4 @@ struct OHCIIsochTransferDescriptorShared
 
 #define	kOHCIStructureAllocationPhysicalMask	0x00000000FFFFF000ULL			// for use with inTaskWithPhysicalMask (below 4GB and 4K aligned)
 
+#endif

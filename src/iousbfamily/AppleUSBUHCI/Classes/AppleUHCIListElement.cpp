@@ -1,9 +1,8 @@
 /*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1998-2003 Apple Computer, Inc.  All Rights Reserved.
+ * Copyright (c) 1998-2007 Apple Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -154,7 +153,7 @@ AppleUHCITransferDescriptor::print(int level)
 {
     UHCITransferDescriptorSharedPtr		shared = GetSharedLogical();
 	UInt32								value;
-	char								*token_type;
+	const char								*token_type;
 	
     super::print(level);
 	value = USBToHostLong(shared->link);
@@ -345,7 +344,7 @@ AppleUHCIIsochTransferDescriptor::UpdateFrameList(AbsoluteTime timeStamp)
 		}
     }
 
-    if (alignBuffer && (_pEndpoint->direction == kUSBIn))
+    if (alignBuffer && alignBuffer->userBuffer && alignBuffer->vaddr && (_pEndpoint->direction == kUSBIn))
 	{
 		// i can't log in here because this is called at interrupt time
 		// i know that this is OK for Low Latency because the buffer will be allocated in low memory and wont' be bounced
@@ -407,7 +406,7 @@ AppleUHCIIsochTransferDescriptor::print(int level)
 {
     UHCITransferDescriptorSharedPtr		shared = GetSharedLogical();
 	UInt32								value;
-	char								*token_type;
+	const char								*token_type;
 	
     super::print(level);
 	value = USBToHostLong(shared->link);

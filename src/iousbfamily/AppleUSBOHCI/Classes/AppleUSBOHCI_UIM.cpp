@@ -2,7 +2,7 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1998-2003 Apple Computer, Inc.  All Rights Reserved.
+ * Copyright (c) 1998-2007 Apple Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -39,7 +39,7 @@ extern "C" {
 
 #define DEBUGGING_LEVEL 0	// 1 = low; 2 = high; 3 = extreme
 
-#define super IOUSBController
+#define super IOUSBControllerV3
 
 static inline OHCIEDFormat
 GetEDType(AppleOHCIEndpointDescriptorPtr pED)
@@ -125,7 +125,7 @@ AppleUSBOHCI::CreateGeneralTransfer(AppleOHCIEndpointDescriptorPtr queue, IOUSBC
 				else
 					pageCount = 2;
 				
-				USBLog(6, "AppleUSBOHCI[%p]::CreateGeneralTransfer - getting segments - offset (%Ld) pageCount (%d) transferOffset (%d) bufferSize (%d)", this, offset, (int)pageCount, (int)transferOffset, (int)bufferSize);
+				USBLog(7, "AppleUSBOHCI[%p]::CreateGeneralTransfer - getting segments - offset (%Ld) pageCount (%d) transferOffset (%d) bufferSize (%d)", this, offset, (int)pageCount, (int)transferOffset, (int)bufferSize);
 				status = dmaCommand->gen64IOVMSegments(&offset, segments64, &pageCount);
 				if (status || ((pageCount != 1) && (pageCount != 2)))
 				{
@@ -135,11 +135,11 @@ AppleUSBOHCI::CreateGeneralTransfer(AppleOHCIEndpointDescriptorPtr queue, IOUSBC
 				}
 				if (pageCount == 2)
 				{
-					USBLog(6, "AppleUSBOHCI[%p]::CreateGeneralTransfer  - after gen64IOVMSegments, offset (%Ld) pageCount (%d) segments64[0].fIOVMAddr (%p) segments64[0].fLength (%d) segments64[1].fIOVMAddr (%p) segments64[1].fLength (%d)", this, offset, (int)pageCount, (void*)segments64[0].fIOVMAddr, (int)segments64[0].fLength, (void*)segments64[1].fIOVMAddr, (int)segments64[1].fLength);
+					USBLog(7, "AppleUSBOHCI[%p]::CreateGeneralTransfer  - after gen64IOVMSegments, offset (%Ld) pageCount (%d) segments64[0].fIOVMAddr (%p) segments64[0].fLength (%d) segments64[1].fIOVMAddr (%p) segments64[1].fLength (%d)", this, offset, (int)pageCount, (void*)segments64[0].fIOVMAddr, (int)segments64[0].fLength, (void*)segments64[1].fIOVMAddr, (int)segments64[1].fLength);
 				}
 				else
 				{
-					USBLog(6, "AppleUSBOHCI[%p]::CreateGeneralTransfer  - after gen64IOVMSegments, offset (%Ld) pageCount (%d) segments64[0].fIOVMAddr (%p) segments64[0].fLength (%d)", this, offset, (int)pageCount, (void*)segments64[0].fIOVMAddr, (int)segments64[0].fLength);
+					USBLog(7, "AppleUSBOHCI[%p]::CreateGeneralTransfer  - after gen64IOVMSegments, offset (%Ld) pageCount (%d) segments64[0].fIOVMAddr (%p) segments64[0].fLength (%d)", this, offset, (int)pageCount, (void*)segments64[0].fIOVMAddr, (int)segments64[0].fLength);
 				}
 				for (i=0; i< pageCount; i++)
 				{
@@ -192,7 +192,7 @@ AppleUSBOHCI::CreateGeneralTransfer(AppleOHCIEndpointDescriptorPtr queue, IOUSBC
 					}
 					OSWriteLittleInt32(&pOHCIGeneralTransferDescriptor->pShared->bufferEnd, 0, segments32[1].fIOVMAddr + segments32[1].fLength - 1);
 					transferOffset += segments32[1].fLength;
-					USBLog(6, "AppleUSBOHCI[%p]::CreateGeneralTransfer - added length of segment 1, transferOffset now %d", this, (int)transferOffset);
+					USBLog(7, "AppleUSBOHCI[%p]::CreateGeneralTransfer - added length of segment 1, transferOffset now %d", this, (int)transferOffset);
 				}
 				else
 				{
@@ -210,7 +210,7 @@ AppleUSBOHCI::CreateGeneralTransfer(AppleOHCIEndpointDescriptorPtr queue, IOUSBC
 				pOHCIGeneralTransferDescriptor->pType = type;
 				pOHCIGeneralTransferDescriptor->command = command;
 				transferOffset += segments32[0].fLength;
-				USBLog(6, "AppleUSBOHCI[%p]::CreateGeneralTransfer - added length of segment 0, transferOffset now %d", this, (int)transferOffset);
+				USBLog(7, "AppleUSBOHCI[%p]::CreateGeneralTransfer - added length of segment 0, transferOffset now %d", this, (int)transferOffset);
 
 				// only supply a callback when the entire buffer has been transfered.
 				if (transferOffset >= bufferSize)
@@ -276,7 +276,9 @@ AppleUSBOHCI::CreateGeneralTransfer(AppleOHCIEndpointDescriptorPtr queue, IOUSBC
     print_td(pOHCIGeneralTransferDescriptor);
 #endif
     if (status)
+	{
         USBLog(1, "AppleUSBOHCI[%p] CreateGeneralTransfer: returning status 0x%x", this, status);
+	}
     return (status);
 }
 
@@ -543,7 +545,7 @@ AppleUSBOHCI::UIMCreateBulkTransfer(IOUSBCommand* command)
     short								direction = command->GetDirection();
     IOMemoryDescriptor*					buffer = command->GetBuffer();
 
-    USBLog(3, "AppleUSBOHCI[%p]::UIMCreateBulkTransfer: adr=%d:%d cbp=%lx:%lx br=%s cback=[%lx:%lx:%lx] dir=%d)",this,
+    USBLog(7, "AppleUSBOHCI[%p]::UIMCreateBulkTransfer: adr=%d:%d cbp=%lx:%lx br=%s cback=[%lx:%lx:%lx] dir=%d)",this,
 	command->GetAddress(), command->GetEndpoint(), (UInt32)buffer, command->GetReqCount(), command->GetBufferRounding() ?"YES":"NO", 
 	(UInt32)completion.action, (UInt32)completion.target, (UInt32)completion.parameter, direction);
 
@@ -623,7 +625,7 @@ AppleUSBOHCI::UIMCreateInterruptEndpoint(
             return kIOReturnBadArgument;
         }
         
-        return SimulateInterruptEDCreate(maxPacketSize, pollingRate);
+        return RootHubStartTimer(pollingRate);
     }
     
     // Modify direction to be an OHCI direction, as opposed to the USB direction.
@@ -651,7 +653,9 @@ AppleUSBOHCI::UIMCreateInterruptEndpoint(
         }
     }
     else
+	{
         USBLog(3, "AppleUSBOHCI[%p]: UIMCreateInterruptEndpoint endpoint does NOT exist", this);
+	}
     
     
     ///ZZZZz  opti bug fix!!!!
@@ -703,14 +707,14 @@ AppleUSBOHCI::UIMCreateInterruptTransfer(
 IOReturn
 AppleUSBOHCI::UIMCreateInterruptTransfer(IOUSBCommand* command)
 {
-    IOReturn				status = kIOReturnSuccess;
-    UInt32				myBufferRounding = 0;
-    UInt32				myDirection;
-    UInt32				myToggle;
+    IOReturn							status = kIOReturnSuccess;
+    UInt32								myBufferRounding = 0;
+    UInt32								myDirection;
+    UInt32								myToggle;
     AppleOHCIEndpointDescriptorPtr		pEDQueue, temp;
-    IOUSBCompletion			completion = command->GetUSLCompletion();
-    IOMemoryDescriptor*			buffer = command->GetBuffer();
-    short				direction = command->GetDirection(); // our local copy may change
+    IOUSBCompletion						completion = command->GetUSLCompletion();
+    IOMemoryDescriptor*					buffer = command->GetBuffer();
+    short								direction = command->GetDirection(); // our local copy may change
 
     if (_rootHubFuncAddress == command->GetAddress())
     {
@@ -719,11 +723,19 @@ AppleUSBOHCI::UIMCreateInterruptTransfer(IOUSBCommand* command)
 		
 		if (memDesc)
 		{
-			USBLog(3, "AppleUSBUHCI[%p]::UIMCreateInterruptTransfer - root hub interrupt transfer - clearing memDesc (%p) from dmaCommand (%p)", this, memDesc, dmaCommand);
+			USBLog(3, "AppleUSBOHCI[%p]::UIMCreateInterruptTransfer - root hub interrupt transfer - clearing  unneeded memDesc (%p) from dmaCommand (%p)", this, memDesc, dmaCommand);
 			dmaCommand->clearMemoryDescriptor();
 		}
-        SimulateRootHubInt(command->GetEndpoint(), buffer, command->GetReqCount(), completion);
-        return kIOReturnSuccess;
+		if (command->GetEndpoint() == 1)
+		{
+			status = RootHubQueueInterruptRead(buffer, command->GetReqCount(), completion);
+		}
+		else
+		{
+			Complete(completion, kIOUSBEndpointNotFound, command->GetReqCount());
+			status = kIOUSBEndpointNotFound;
+		}
+        return status;
     }
 
     USBLog(7, "AppleUSBOHCI[%p]::UIMCreateInterruptTransfer: adr=%d:%d cbp=%p:%lx br=%s cback=[%lx:%lx:%lx])", this,
@@ -871,317 +883,6 @@ AppleUSBOHCI::UIMCreateIsochTransfer(short						functionAddress,
 {
 	USBError(1, "AppleUSBOHCI::UIMCreateIsochTransfer - old method");
 	return kIOReturnIPCError;
-	
-	/******
-		
-		IOReturn								status = kIOReturnSuccess;
-    AppleOHCIIsochTransferDescriptorPtr		pTailITD = NULL;
-    AppleOHCIIsochTransferDescriptorPtr		pNewITD = NULL;
-    AppleOHCIIsochTransferDescriptorPtr		pTempITD = NULL;
-    UInt32									i;
-    UInt32									curFrameInRequest = 0;
-    UInt32									bufferSize = 0;
-    UInt32									pageOffset = 0;
-    UInt32									prevFramesPage = 0;
-    UInt32									lastPhysical = 0;
-    UInt32									segmentEnd = 0;
-    AppleOHCIEndpointDescriptorPtr			pED;
-    UInt32									curFrameInTD = 0;
-    UInt16									frameNumber = (UInt16) frameNumberStart;
-    UInt64									curFrameNumber = GetFrameNumber();
-    UInt64									frameDiff;
-    UInt64									maxOffset = (UInt64)(0x00007FF0);
-    UInt32									diff32;
-
-    UInt32									itdFlags = 0;
-    UInt32									numSegs = 0;
-    UInt32									physPageStart = 0;
-    UInt32									physPageEnd = 0;
-    UInt32									pageSelectMask = 0;
-    bool									needNewITD;
-    bool									multiPageSegment = false;
-    IOPhysicalSegment						segs[2];
-    UInt32									tdType;
-    IOByteCount								transferOffset;
-	bool									requestFromRosettaClient = false;
-
-
-    if ( (frameCount == 0) || (frameCount > 1000) )
-    {
-        USBLog(3,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer bad frameCount: %ld", this, frameCount);
-        return kIOReturnBadArgument;
-    }
-
-	// Determine if our request came from a rosetta client and reset the direction if so
-	if ( direction & 0x80 )
-	{
-		requestFromRosettaClient = true;
-		direction &= ~0x80;
-	}
-	
-    if (direction == kUSBOut) 
-	{
-        direction = kOHCIEDDirectionOut;
-        tdType = kOHCIIsochronousOutType;
-    }
-    else if (direction == kUSBIn) 
-	{
-        direction = kOHCIEDDirectionIn;
-        tdType = kOHCIIsochronousInType;
-    }
-    else
-        return kIOReturnInternalError;
-
-    pED = FindIsochronousEndpoint(functionAddress, endpointNumber, direction, NULL);
-
-    if (!pED)
-    {
-        USBLog(3,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer endpoint (%d) not found: 0x%x", this, endpointNumber, kIOUSBEndpointNotFound);
-        return kIOUSBEndpointNotFound;
-    }
-
-    if (frameNumberStart <= curFrameNumber)
-    {
-        if (frameNumberStart < (curFrameNumber - maxOffset))
-        {
-            USBLog(3,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer request frame WAY too old.  frameNumberStart: %ld, curFrameNumber: %ld.  Returning 0x%x", this, (UInt32) frameNumberStart, (UInt32) curFrameNumber, kIOReturnIsoTooOld);
-            return kIOReturnIsoTooOld;
-        }
-        USBLog(5,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer WARNING! curframe later than requested, expect some notSent errors!  frameNumberStart: %ld, curFrameNumber: %ld.  USBIsocFrame Ptr: %p, First ITD: %p", this, (UInt32) frameNumberStart, (UInt32) curFrameNumber, pFrames, pED->pLogicalTailP);
-    } else 
-    {					// frameNumberStart > curFrameNumber
-        if (frameNumberStart > (curFrameNumber + maxOffset))
-        {
-            USBLog(3,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer request frame too far ahead!  frameNumberStart: %ld, curFrameNumber: %ld", this, (UInt32) frameNumberStart, (UInt32) curFrameNumber);
-            return kIOReturnIsoTooNew;
-        }
-        frameDiff = frameNumberStart - curFrameNumber;
-        diff32 = (UInt32)frameDiff;
-        if (diff32 < 2)
-        {
-            USBLog(5,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer WARNING! - frameNumberStart less than 2 ms (is %ld)!  frameNumberStart: %ld, curFrameNumber: %ld", this, (UInt32) diff32, (UInt32) frameNumberStart, (UInt32) curFrameNumber);
-        }
-    }
-
-    //
-    //  Get the total size of buffer
-    //
-    for ( i = 0; i< frameCount; i++)
-    {
-        if (pFrames[i].frReqCount > kUSBMaxFSIsocEndpointReqCount)
-        {
-            USBLog(3,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer Isoch frame too big %d", this, pFrames[i].frReqCount);
-            return kIOReturnBadArgument;
-        }
-        bufferSize += pFrames[i].frReqCount;        
-    }
-
-    USBLog(7,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer transfer %s, buffer: %p, length: %ld", this, (direction == kOHCIEDDirectionIn) ? "in" : "out", pBuffer, bufferSize);
-
-    //
-    // go ahead and make sure we can grab at least ONE TD, before we lock the buffer	
-    //
-    pNewITD = AllocateITD();
-    USBLog(7, "AppleUSBOHCI[%p]::UIMCreateIsochTransfer - new iTD %p", this, pNewITD);
-    if (pNewITD == NULL)
-    {
-        USBLog(1,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer Could not allocate a new iTD", this);
-        return kIOReturnNoMemory;
-    }
-
-    if (!bufferSize) 
-	{
-		// Set up suitable dummy info
-        numSegs = 1;
-        segs[0].location = segs[0].length = 0;
-		pageOffset = 0;
-    }
-    pTailITD = (AppleOHCIIsochTransferDescriptorPtr)pED->pLogicalTailP;	// start with the unused TD on the tail of the list
-    OSWriteLittleInt32(&pTailITD->pShared->nextTD, 0, pNewITD->pPhysical);	// link in the new ITD
-    pTailITD->pLogicalNext = pNewITD;
-
-    needNewITD = false;
-    transferOffset = 0;
-    while (curFrameInRequest < frameCount) 
-    {
-        // Get physical segments for next frame
-        if (!needNewITD && bufferSize && (pFrames[curFrameInRequest].frReqCount != 0) ) 
-		{
-			numSegs = 2;				// maximum number of segments
-			
-            numSegs = _isoCursor->getPhysicalSegments(pBuffer, transferOffset, segs, 2, pFrames[curFrameInRequest].frReqCount);
-            pageOffset = segs[0].location & kOHCIPageOffsetMask;
-            transferOffset += segs[0].length;
-            segmentEnd = (segs[0].location + segs[0].length )  & kOHCIPageOffsetMask;
-            
-            USBLog(8,"curFrameInRequest: %ld, curFrameInTD: %ld, pageOffset: %lx, numSegs: %ld, seg[0].location: 0x%lx, seg[0].length: %ld", curFrameInRequest, curFrameInTD, pageOffset, numSegs, segs[0].location, segs[0].length);
-            
-            if(numSegs == 2)
-            {
-                transferOffset += segs[1].length;
-                USBLog(8 ,"seg[1].location: 0x%lx, seg[1].length %ld",segs[1].location, segs[1].length);
-                
-                // If we are wrapping around the same physical page and we are on an NEC controller, then we need to discard the 2nd segment.  It will click
-                // but at least we won't hang the controller
-                //
-                if ( (_errataBits & kErrataNECOHCIIsochWraparound) && ((segs[0].location & kOHCIPageMask) == (segs[1].location & kOHCIPageMask)) )
-                {
-                    USBLog(1,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer(LL) On an NEC controller and frame data wraps from end of buffer to beginning.  Dropping data to avoid controller hang", this);
-                    numSegs = 1;
-                }
-            }
-            
-            if ( (segs[numSegs-1].location & kOHCIPageMask) != ((segs[numSegs-1].location + segs[numSegs-1].length) & kOHCIPageMask))
-            {
-                multiPageSegment = true;
-                USBLog(8,"We have a segment that crosses a page boundary:  start: 0x%lx, length: %ld, end: 0x%lx, curFrameinTD: %ld", segs[numSegs-1].location, segs[numSegs-1].length,segs[numSegs-1].location + segs[numSegs-1].length, curFrameInTD);
-            }
-            else
-                multiPageSegment = false;
-        }
-
-        if (curFrameInTD == 0) 
-		{
-            // set up counters which get reinitialized with each TD
-            physPageStart = segs[0].location & kOHCIPageMask;	// for calculating real 13 bit offsets
-            pageSelectMask = 0;					// First frame always starts on first page
-            needNewITD = false;
-
-            // set up the header of the TD - itdFlags will be stored into flags later
-            itdFlags = (UInt16)(curFrameInRequest + frameNumber);
-            pTailITD->pIsocFrame = pFrames;		// so we can get back to our info later
-            pTailITD->frameNum = curFrameInRequest;	// our own index into the above array
-            pTailITD->pType = tdType;			// So interrupt handler knows TD type.
-            OSWriteLittleInt32(&pTailITD->pShared->bufferPage0, 0,  physPageStart);
-        }
-        else if ((segs[0].location & kOHCIPageMask) != physPageStart) 
-		{
-            // pageSelectMask is set if we've already used our one allowed page cross.
-            //
-            if ( (pageSelectMask && (((segs[0].location & kOHCIPageMask) != physPageEnd) || numSegs == 2)) )
-			{
-                // Need new ITD for this condition
-                needNewITD = true;
-                
-                USBLog(8, "AppleUSBOHCI[%p]::UIMCreateIsochTransfer - got it! (%ld, 0x%lx, 0x%lx, %ld)", this, pageSelectMask, segs[0].location & kOHCIPageMask, physPageEnd, numSegs);
-                
-            }
-            else if ( pageSelectMask && multiPageSegment )
-            {
-                // We have already crossed one page and we have a segment that spans 2 or more pages
-                //
-                needNewITD = true;
-                USBLog(8,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer This frame spans 2 or more pages and we already used our page crossing ", this);
-            }
-            else if ( (prevFramesPage != (segs[0].location & kOHCIPageMask)) && (segmentEnd != 0) )
-            {
-                // We have a segment that starts in a new page but the previous one did not end
-                // on a page boundary.  Need a new ITD for this condition. 
-                // Need new ITD for this condition
-                needNewITD = true;
-                
-                USBLog(8,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer This frame starts on a new page and the previous one did NOT end on a page boundary (%ld)", this, segmentEnd);
-            }
-            else
-			{
-                if (pageSelectMask == 0 )
-                    USBLog(8,"Using our page crossing for this TD (0x%lx)",(segs[numSegs-1].location + segs[numSegs-1].length -1 ) & kOHCIPageMask);
-
-                pageSelectMask = kOHCIPageSize;	// ie. set bit 13
-				physPageEnd = (segs[numSegs-1].location  + segs[numSegs-1].length) & kOHCIPageMask;
-			}
-        }
-        
-        // Save this frame's Page so that we can use it when the next frame is process to compare and see
-        // if they are different
-        //
-        prevFramesPage = (segs[numSegs-1].location  + segs[numSegs-1].length) & kOHCIPageMask;
-                
-        if ((curFrameInTD > 7) || needNewITD) 
-		{
-            // we need to start a new TD
-            needNewITD = true;	// To simplify test at top of loop.
-            itdFlags |= (curFrameInTD-1) << kOHCIITDControl_FCPhase;
-            OSWriteLittleInt32(&pTailITD->pShared->bufferEnd, 0, lastPhysical);
-            curFrameInTD = 0;
-            pNewITD = AllocateITD();
-            USBLog(7, "AppleUSBOHCI[%p]::UIMCreateIsochTransfer - new iTD %p", this, pNewITD);
-            if (pNewITD == NULL) 
-			{
-                status = kIOReturnNoMemory;
-				break;
-            }
-            // Handy for debugging transfer lists
-            itdFlags |= (kOHCIGTDConditionNotAccessed << kOHCIGTDControl_CCPhase);
-            
-            // In the past, we set the DI bits to 111b at this point, so that we only interrupted in the last transfer.  
-            // However, this presents a problem when we abort a pipe, there might be a partial transfer 
-            // in the done queue that has not caused an interrupt.  Then  when another TD completes, we will
-            // process this orphaned  TD and update the framelist the memory could have been released in the meantime, since
-            // our client could have closed the connection.  So, we need to interrupt for every TD.
-            
-            OSWriteLittleInt32(&pTailITD->pShared->flags, 0, itdFlags);
-
-            // print_itd(pTailITD);
-
-            pTailITD->completion.action = NULL;
-			pTailITD->requestFromRosettaClient = requestFromRosettaClient;
-
-            pTailITD = pTailITD->pLogicalNext;		// this is the "old" pNewTD
-            OSWriteLittleInt32(&pTailITD->pShared->nextTD, 0, pNewITD->pPhysical);	// link to the "new" pNewTD
-            pTailITD->pLogicalNext = pNewITD;
-            continue;		// start over
-        }
-        //
-        // at this point we know we have a frame which will fit into the current TD
-        //
-        // calculate the buffer offset for the beginning of this frame
-        OSWriteLittleInt16(&pTailITD->pShared->offset[curFrameInTD], 0,
-            pageOffset |		// offset
-            pageSelectMask |		// offset from BP0 or BufferEnd
-            (kOHCIITDOffsetConditionNotAccessed << kOHCIITDOffset_CCPhase));	// mark as unused
-
-        // adjust counters and calculate the physical offset of the end of the frame for the next time around the loop
-        curFrameInRequest++;
-        curFrameInTD++;
-        lastPhysical = segs[numSegs-1].location + segs[numSegs-1].length - 1;
-    }			
-
-    if (status != kIOReturnSuccess)
-    {
-        // unlink the TDs, unlock the buffer, and return the status
-        pNewITD = pTailITD->pLogicalNext;	// point to the "old" pNewTD, which will also get deallocated
-        pTempITD = (AppleOHCIIsochTransferDescriptorPtr)pED->pLogicalTailP;
-        pTailITD = pTempITD->pLogicalNext;	// don't deallocate the real tail!
-        pTempITD->pLogicalNext = NULL;		// just to make sure
-        pTempITD->pShared->nextTD = NULL;			// just to make sure
-        while (pTailITD != pNewITD)
-        {
-            pTempITD = pTailITD;
-            pTailITD = pTailITD->pLogicalNext;
-            DeallocateITD(pTempITD);
-        }
-    }
-    else
-    {
-        // we have good status, so let's kick off the machine
-        // we need to tidy up the last TD, which is not yet complete
-        itdFlags |= (curFrameInTD-1) << kOHCIITDControl_FCPhase;
-        OSWriteLittleInt32(&pTailITD->pShared->flags, 0, itdFlags);
-        OSWriteLittleInt32(&pTailITD->pShared->bufferEnd, 0, lastPhysical);
-        pTailITD->completion = completion;
-		pTailITD->requestFromRosettaClient = requestFromRosettaClient;
-
-        // print_itd(pTailITD);
-        // Make new descriptor the tail
-        pED->pLogicalTailP = pNewITD;
-        OSWriteLittleInt32(&pED->pShared->tdQueueTailPtr, 0, pNewITD->pPhysical);
-    }
-
-    //print_isoc_ed(pED);
-
-    return status;
-	*****/
 }
 
 
@@ -1241,10 +942,11 @@ AppleUSBOHCI::UIMAbortEndpoint(short				functionAddress,
         UIMProcessDoneQueue(NULL);
     }
 
-    RemoveTDs(pED);
+	// Remove any TDs from the endpoint, but do NOT reset the data toggle
+    RemoveTDs(pED, false);
 
     pED->pShared->flags &= ~HostToUSBLong(kOHCIEDControl_K);	// activate ED again
-
+	IOSync();
 
     return (kIOReturnSuccess);
 }
@@ -1396,7 +1098,8 @@ AppleUSBOHCI::UIMClearEndpointStall(short functionAddress, short endpointNumber,
     {
         tail = USBToHostLong(pED->pShared->tdQueueTailPtr);
         transaction = AppleUSBOHCIgtdMemoryBlock::GetGTDFromPhysical(USBToHostLong(pED->pShared->tdQueueHeadPtr) & kOHCIHeadPMask);
-        // unlink all transactions at once (this also clears the halted bit)
+        
+		// Unlink all transactions at once (this also clears the halted bit AND resets the data toggle)
         pED->pShared->tdQueueHeadPtr = pED->pShared->tdQueueTailPtr;
         pED->pLogicalHeadP = pED->pLogicalTailP;
     }	
@@ -1533,9 +1236,9 @@ AppleUSBOHCI::FindControlEndpoint (
 
 AppleOHCIEndpointDescriptorPtr 
 AppleUSBOHCI::FindBulkEndpoint (
-	short 						functionNumber, 
-	short						endpointNumber,
-	short						direction,
+	short									functionNumber, 
+	short									endpointNumber,
+	short									direction,
 	AppleOHCIEndpointDescriptorPtr			*pEDBack)
 {
 
@@ -1547,8 +1250,7 @@ AppleUSBOHCI::FindBulkEndpoint (
 
     // search for endpoint descriptor
     myEndpointDirection = ((UInt32) direction) << kOHCIEndpointDirectionOffset;
-    unique = (UInt32) ((((UInt32) endpointNumber) << kOHCIEndpointNumberOffset)
-                       | ((UInt32) functionNumber) | myEndpointDirection);
+    unique = (UInt32) ((((UInt32) endpointNumber) << kOHCIEndpointNumberOffset) | ((UInt32) functionNumber) | myEndpointDirection);
     pEDQueueBack = (AppleOHCIEndpointDescriptorPtr) _pBulkHead;
     pEDQueue = pEDQueueBack->pLogicalNext;
 
@@ -1655,16 +1357,16 @@ AppleUSBOHCI::FindIsochronousEndpoint(
 
 AppleOHCIEndpointDescriptorPtr 
 AppleUSBOHCI::FindInterruptEndpoint(
-	short 					functionNumber,
-	short					endpointNumber,
-        short					direction,
+	short								functionNumber,
+	short								endpointNumber,
+        short							direction,
 	AppleOHCIEndpointDescriptorPtr		*pEDBack)
 {
-    UInt32				myEndpointDirection;
-    UInt32				unique;
+    UInt32								myEndpointDirection;
+    UInt32								unique;
     AppleOHCIEndpointDescriptorPtr		pEDQueue;
-    int					i;
-    UInt32				temp;
+    int									i;
+    UInt32								temp;
     
     //search for endpoint descriptor
     myEndpointDirection = ((UInt32) direction) << kOHCIEndpointDirectionOffset;
@@ -1822,7 +1524,7 @@ AppleUSBOHCI::print_ed(AppleOHCIEndpointDescriptorPtr pED)
               (w0 & kOHCIEDControl_FA) >> kOHCIEDControl_FAPhase,
               (w0 & kOHCIEDControl_EN) >> kOHCIEDControl_ENPhase,
               (w0 & kOHCIEDControl_D)  >> kOHCIEDControl_DPhase,
-              w0 & kOHCIEDControl_S?"low":"hi",
+              w0 & kOHCIEDControl_S?"low":"full",
               w0 & kOHCIEDControl_K?"yes":"no",
               w0 & kOHCIEDControl_F?"yes":"no",
               (w0 & kOHCIEDControl_MPS) >> kOHCIEDControl_MPSPhase,
@@ -1986,9 +1688,11 @@ AppleUSBOHCI::CheckEDListForTimeouts(AppleOHCIEndpointDescriptorPtr head, AppleO
             }
             if ((curFrame - firstActiveFrame) >= completionTimeout)
             {
-                USBLog(2, "(%p)Found a transaction past the completion deadline, timing out! (0x%lx - 0x%lx)", pTD, curFrame, firstActiveFrame);
-                USBError(1,"AppleUSBOHCI[%p]::Found a transaction past the completion deadline on bus %ld, timing out!", this, _busNumber);
-                ReturnOneTransaction(pTD, pED, kIOUSBTransactionTimeout);
+				UInt32	myFlags = USBToHostLong( pED->pShared->flags);
+                USBLog(2, "AppleUSBOHCI[%p]::Found a transaction past the completion deadline, timing out! (%p, 0x%lx - 0x%lx)", this, pTD, curFrame, firstActiveFrame);
+				USBError(1, "AppleUSBOHCI[%p]::Found a transaction past the completion deadline on bus 0x%lx, timing out! (Addr: %ld, EP: %ld)", this, _busNumber, ((myFlags & kOHCIEDControl_FA) >> kOHCIEDControl_FAPhase), ((myFlags & kOHCIEDControl_EN) >> kOHCIEDControl_ENPhase) );
+               
+				ReturnOneTransaction(pTD, pED, kIOUSBTransactionTimeout);
                 continue;
             }
         }
@@ -2012,8 +1716,10 @@ AppleUSBOHCI::CheckEDListForTimeouts(AppleOHCIEndpointDescriptorPtr head, AppleO
         }
         if ((curFrame - pTD->lastFrame) >= noDataTimeout)
         {
-            USBLog(2, "(%p)Found a transaction which hasn't moved in 5 seconds, timing out! (0x%lx - 0x%lx)", pTD, curFrame, pTD->lastFrame);
-            USBError(1,"AppleUSBOHCI[%p]::Found a transaction which hasn't moved in 5 seconds on bus %ld, timing out!", this, _busNumber);
+			UInt32	myFlags = USBToHostLong( pED->pShared->flags); 
+            USBLog(2, "AppleUSBOHCI[%p]::Found a transaction which hasn't moved in 5 seconds, timing out! (%p, 0x%lx - 0x%lx)", this, pTD, curFrame, pTD->lastFrame);
+			USBError(1, "AppleUSBOHCI[%p]::Found a transaction which hasn't moved in 5 seconds on bus 0x%lx, timing out! (Addr: %ld, EP: %ld)", this, _busNumber, ((myFlags & kOHCIEDControl_FA) >> kOHCIEDControl_FAPhase), ((myFlags & kOHCIEDControl_EN) >> kOHCIEDControl_ENPhase) );
+			
             ReturnOneTransaction(pTD, pED, kIOUSBTransactionTimeout);
             continue;
         }
@@ -2066,66 +1772,22 @@ AppleUSBOHCI::UIMCheckForTimeouts(void)
     AbsoluteTime	lastRootHubChangeTime;
     UInt64			elapsedTime = 0;
     bool			allPortsDisconnected = false;
-
+	
     // If we are not active anymore or if we're in ohciBusStateOff, then don't check for timeouts 
     //
-    if ( isInactive() || (_onCardBus && _pcCardEjected) || !_ohciAvailable || (_ohciBusState != kOHCIBusStateRunning))
+    if ( isInactive() || (_onCardBus && _pcCardEjected) || !_controllerAvailable || (_myBusState != kUSBBusStateRunning))
 	{
-		USBLog(5,"AppleUSBOHCI[%p]  UIMCheckForTimeouts for bus %ld -- not appropriate", this, _busNumber);
+		USBLog(7,"AppleUSBOHCI[%p]  UIMCheckForTimeouts for bus %ld -- not appropriate", this, _busNumber);
         return;
 	}
     
+	
     // Check to see if our control or bulk lists have a TD that has timed out
     //
     CheckEDListForTimeouts(_pControlHead, _pControlTail);
     CheckEDListForTimeouts(_pBulkHead, _pBulkTail);
 
-    // See if it's time to check for Root Hub inactivity
-    //
-    if ( !_idleSuspend )
-    {
-        // Check to see if it's been kOHCICheckForRootHubConnectionsPeriod seconds
-        // since we last checked this port
-        //
-        clock_get_uptime( &currentTime );
-        SUB_ABSOLUTETIME(&currentTime, &_lastCheckedTime );
-        absolutetime_to_nanoseconds(currentTime, &elapsedTime);
-        elapsedTime /= 1000000000;				// Convert to seconds from nanoseconds
-        
-        if ( elapsedTime >= kOHCICheckForRootHubConnectionsPeriod )
-        {
-            USBLog(6,"AppleUSBOHCI[%p] Time to check for root hub inactivity on bus %ld", this, _busNumber);
-            clock_get_uptime( &_lastCheckedTime );
-            
-            // Check to see if the root hub has been inactive for kOHCICheckForRootHubInactivityPeriod seconds
-            //
-            allPortsDisconnected = RootHubAreAllPortsDisconnected();
-
-            if ( allPortsDisconnected )
-            {                
-                // Find the last time we had a change in the root hub.  If it's been 30 secs or
-                // more, then we are ready to suspend the ports
-                //
-                lastRootHubChangeTime = LastRootHubPortStatusChanged( false );
-    
-                clock_get_uptime( &currentTime );
-                SUB_ABSOLUTETIME(&currentTime, &lastRootHubChangeTime );
-                absolutetime_to_nanoseconds(currentTime, &elapsedTime);
-                elapsedTime /= 1000000000;
-            
-                if ( elapsedTime >= kOHCICheckForRootHubInactivityPeriod )
-                {
-                    // Yes, nothing connected to this root hub and it's been more than kOHCICheckForRootHubInactivityPeriod secs since
-                    // we last saw something happen on it, so let's suspend that bus
-                    //
-                    USBLog(5,"AppleUSBOHCI[%p] Time to suspend the ports of bus %ld", this, _busNumber);
-                    setPowerState( kOHCISetPowerLevelIdleSuspend, this);
-                }
-            }
-        }
-    }
-    
-    // From OS9:  Ferg 1-29-01
+     // From OS9:  Ferg 1-29-01
     // some controllers can be swamped by PCI traffic and essentially go dead.  
     // here we attempt to detect this condition and recover from it.
     //
@@ -2134,6 +1796,8 @@ AppleUSBOHCI::UIMCheckForTimeouts(void)
         UInt16 			hccaFrameNumber, hcFrameNumber;
         UInt32			fmInterval, hcca, bulkHead, controlHead, periodicStart, intEnable, fmNumber;
         
+		// this should be done by the new power manager code
+		
         hcFrameNumber = (UInt16) USBToHostLong(_pOHCIRegisters->hcFmNumber);  // check this first in case an interrupt delays the second read
         hccaFrameNumber = (UInt16) USBToHostLong(*(UInt32 *)(_pHCCA + 0x80));
         
@@ -2197,7 +1861,6 @@ AppleUSBOHCI::UIMCheckForTimeouts(void)
                                                 | kOHCIHcControl_PLE | kOHCIHcControl_IE);
         }
     }
-
 }
 
 
@@ -2216,329 +1879,6 @@ AppleUSBOHCI::UIMCreateIsochTransfer(short						functionAddress,
 	
 	USBError(1, "AppleUSBOHCI::UIMCreateIsochTransfer(LL) - old method");
 	return kIOReturnIPCError;
-	
-	/******
-
-    IOReturn 				status = kIOReturnSuccess;
-    AppleOHCIIsochTransferDescriptorPtr	pTailITD = NULL;
-    AppleOHCIIsochTransferDescriptorPtr	pNewITD = NULL;
-    AppleOHCIIsochTransferDescriptorPtr	pTempITD = NULL;
-    UInt32				i;
-    UInt32				curFrameInRequest = 0;
-    UInt32				bufferSize = 0;
-    UInt32				pageOffset = 0;
-    UInt32				segmentEnd = 0;
-    UInt32				lastPhysical = 0;
-    AppleOHCIEndpointDescriptorPtr		pED;
-    UInt32				curFrameInTD = 0;
-    UInt16				frameNumber = (UInt16) frameNumberStart;
-    UInt64				curFrameNumber = GetFrameNumber();
-    UInt64				frameDiff;
-    UInt64				maxOffset = (UInt64)(0x00007FF0);
-    UInt32				diff32;
-
-    UInt32				itdFlags = 0;
-    UInt32				numSegs = 0;
-    UInt32				physPageStart = 0;
-    UInt32				prevFramesPage = 0;
-    UInt32				physPageEnd = 0;
-    UInt32				pageSelectMask = 0;
-    bool				needNewITD;
-    bool				multiPageSegment = false;
-    IOPhysicalSegment			segs[2];
-    UInt32				tdType;
-    IOByteCount				transferOffset;
-    bool				useUpdateFrequency = true;
-	bool				requestFromRosettaClient = false;
-
-    if ( (frameCount == 0) || (frameCount > 1000) )
-    {
-        USBLog(3,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer(LL) bad frameCount: %ld", this, frameCount);
-        return kIOReturnBadArgument;
-    }
-
-	// Determine if our request came from a rosetta client and reset the direction if so
-	if ( direction & 0x80 )
-	{
-		requestFromRosettaClient = true;
-		direction &= ~0x80;
-	}
-	
-    if (direction == kUSBOut) {
-        direction = kOHCIEDDirectionOut;
-        tdType = kOHCIIsochronousOutLowLatencyType;
-    }
-    else if (direction == kUSBIn) {
-        direction = kOHCIEDDirectionIn;
-        tdType = kOHCIIsochronousInLowLatencyType;
-    }
-    else
-        return kIOReturnInternalError;
-
-    pED = FindIsochronousEndpoint(functionAddress, endpointNumber, direction, NULL);
-
-    if (!pED)
-    {
-        USBLog(3,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer(LL) endpoint (%d) not found. Returning 0x%x", this, endpointNumber, kIOUSBEndpointNotFound);
-        return kIOUSBEndpointNotFound;
-    }
-
-    if ( updateFrequency == 0 )
-        useUpdateFrequency = false;
-        
-    if (frameNumberStart <= curFrameNumber)
-    {
-        if (frameNumberStart < (curFrameNumber - maxOffset))
-        {
-            USBLog(3,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer(LL) request frame WAY too old.  frameNumberStart: %ld, curFrameNumber: %ld.  Returning 0x%x", this, (UInt32) frameNumberStart, (UInt32) curFrameNumber, kIOReturnIsoTooOld);
-            return kIOReturnIsoTooOld;
-        }
-       USBLog(6,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer(LL) WARNING! curframe later than requested, expect some notSent errors!  frameNumberStart: %ld, curFrameNumber: %ld.  USBIsocFrame Ptr: %p, First ITD: %p", this, (UInt32) frameNumberStart, (UInt32) curFrameNumber, pFrames, pED->pLogicalTailP);
-    } else 
-    {	
-        // frameNumberStart > curFrameNumber
-        //
-        if (frameNumberStart > (curFrameNumber + maxOffset))
-        {
-            USBLog(3,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer(LL) request frame too far ahead!  frameNumberStart: %ld, curFrameNumber: %ld, Returning 0x%x", this, (UInt32) frameNumberStart, (UInt32) curFrameNumber, kIOReturnIsoTooNew);
-            return kIOReturnIsoTooNew;
-        }
-        
-        // Check to see how far in advance the frame is scheduled
-        frameDiff = frameNumberStart - curFrameNumber;
-        diff32 = (UInt32)frameDiff;
-        if (diff32 < 2)
-        {
-            USBLog(5,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer(LL) WARNING! - frameNumberStart less than 2 ms (is %ld)!  frameNumberStart: %ld, curFrameNumber: %ld", this, (UInt32) diff32, (UInt32) frameNumberStart, (UInt32) curFrameNumber);
-        }
-    }
-
-    //
-    //  Get the total size of buffer
-    //
-    for ( i = 0; i< frameCount; i++)
-    {
-        if (pFrames[i].frReqCount > kUSBMaxFSIsocEndpointReqCount)
-        {
-            USBLog(3,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer(LL) Isoch frame (%ld) too big %d", this, i + 1, pFrames[i].frReqCount);
-            return kIOReturnBadArgument;
-        }
-        bufferSize += pFrames[i].frReqCount;
-        
-		// Make sure our frStatus field has a known value.  This is used by the client to know whether the transfer has been completed or not
-		//
-		pFrames[i].frStatus = requestFromRosettaClient ? (IOReturn) OSSwapInt32(kUSBLowLatencyIsochTransferKey) : (IOReturn) kUSBLowLatencyIsochTransferKey;
-    }
-
-    USBLog(7,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer(LL) transfer %s, buffer: %p, length: %ld frames: %ld, updateFreq: %ld", this, (direction == kOHCIEDDirectionIn) ? "in" : "out", pBuffer, bufferSize, frameCount, updateFrequency);
-
-    //
-    // go ahead and make sure we can grab at least ONE TD, before we lock the buffer	
-    //
-    pNewITD = AllocateITD();
-    USBLog(7, "AppleUSBOHCI[%p]::UIMCreateIsochTransfer(LL) - new iTD %p", this, pNewITD);
-    if (pNewITD == NULL)
-    {
-        USBLog(1,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer(LL) Could not allocate a new iTD", this);
-        return kIOReturnNoMemory;
-    }
-
-    if (!bufferSize) 
-    {
-	// Set up suitable dummy info
-        numSegs = 1;
-        segs[0].location = segs[0].length = 0;
-	pageOffset = 0;
-    }
-    
-    pTailITD = (AppleOHCIIsochTransferDescriptorPtr)pED->pLogicalTailP;	// start with the unused TD on the tail of the list
-    OSWriteLittleInt32(&pTailITD->pShared->nextTD, 0, pNewITD->pPhysical);	// link in the new ITD
-    pTailITD->pLogicalNext = pNewITD;
-
-    needNewITD = false;
-    transferOffset = 0;
-    while (curFrameInRequest < frameCount) 
-    {
-        // Get physical segments for next frame
-        if (!needNewITD && bufferSize && (pFrames[curFrameInRequest].frReqCount != 0) ) 
-		{
-            numSegs = _isoCursor->getPhysicalSegments(pBuffer, transferOffset, segs, 2, pFrames[curFrameInRequest].frReqCount);
-            pageOffset = segs[0].location & kOHCIPageOffsetMask;
-            transferOffset += segs[0].length;
-            segmentEnd = (segs[0].location + segs[0].length )  & kOHCIPageOffsetMask;
-			
-            USBLog(8,"curFrameInRequest: %ld, curFrameInTD: %ld, pageOffset: 0x%lx, numSegs: %ld, seg[0].location: 0x%lx, seg[0].length: %ld", curFrameInRequest, curFrameInTD, pageOffset, numSegs, segs[0].location, segs[0].length);
-			
-            if(numSegs == 2)
-            {
-                transferOffset += segs[1].length;
-                USBLog(8 ,"seg[1].location: 0x%lx, seg[1].length %ld",segs[1].location, segs[1].length);
-                
-                // If we are wrapping around the same physical page and we are on an NEC controller, then we need to discard the 2nd segment.  It will click
-                // but at least we won't hang the controller
-                //
-                if ( (_errataBits & kErrataNECOHCIIsochWraparound) && ((segs[0].location & kOHCIPageMask) == (segs[1].location & kOHCIPageMask)) )
-                {
-                    USBLog(1,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer(LL) On an NEC controller and frame data wraps from end of buffer to beginning.  Dropping data to avoid controller hang", this);
-                    numSegs = 1;
-                }
-            }
-			
-            if ( (segs[numSegs-1].location & kOHCIPageMask) != ((segs[numSegs-1].location + segs[numSegs-1].length) & kOHCIPageMask))
-            {
-                multiPageSegment = true;
-                USBLog(8,"We have a segment that crosses a page boundary:  start: 0x%lx, length: %ld, end: 0x%lx, curFrameinTD: %ld", segs[numSegs-1].location, segs[numSegs-1].length,segs[numSegs-1].location + segs[numSegs-1].length, curFrameInTD);
-            }
-            else
-                multiPageSegment = false;
-        }
-
-        if (curFrameInTD == 0) 
-		{
-            // set up counters which get reinitialized with each TD
-            physPageStart = segs[0].location & kOHCIPageMask;	// for calculating real 13 bit offsets
-            pageSelectMask = 0;					// First frame always starts on first page
-            needNewITD = false;
-			
-            // set up the header of the TD - itdFlags will be stored into flags later
-            itdFlags = (UInt16)(curFrameInRequest + frameNumber);
-            pTailITD->pIsocFrame = (IOUSBIsocFrame *) pFrames;		// so we can get back to our info later
-            pTailITD->frameNum = curFrameInRequest;	// our own index into the above array
-            pTailITD->pType = tdType;			// So interrupt handler knows TD type.
-            OSWriteLittleInt32(&pTailITD->pShared->bufferPage0, 0,  physPageStart);
-        }
-        else if ((segs[0].location & kOHCIPageMask) != physPageStart) 
-		{
-            // pageSelectMask is set if we've already used our one allowed page cross.
-            //
-            if ( (pageSelectMask && (((segs[0].location & kOHCIPageMask) != physPageEnd) || numSegs == 2)) )
-			{
-                // Need new ITD for this condition
-                needNewITD = true;
-				
-                USBLog(8, "AppleUSBOHCI[%p]::UIMCreateIsochTransfer - got it! (%ld, 0x%lx, 0x%lx, %ld)", this, pageSelectMask, segs[0].location & kOHCIPageMask, physPageEnd, numSegs);
-                
-            }
-            else if ( pageSelectMask && multiPageSegment )
-            {
-                // We have already crossed one page and we have a segment that spans 2 or more pages
-                //
-                needNewITD = true;
-                USBLog(8,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer This frame spans 2 or more pages and we already used our page crossing ", this);
-            }
-            else if ( (prevFramesPage != (segs[0].location & kOHCIPageMask)) && (segmentEnd != 0) )
-            {
-                // We have a segment that starts in a new page but the previous one did not end
-                // on a page boundary.  Need a new ITD for this condition. 
-                // Need new ITD for this condition
-                needNewITD = true;
-                
-                USBLog(8,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer(LL) This frame starts on a new page and the previous one did NOT end on a page boundary (%ld)", this, segmentEnd);
-            }
-            else
-			{
-                if (pageSelectMask == 0 )
-                    USBLog(8,"Using our page crossing for this TD (0x%lx)",(segs[numSegs-1].location + segs[numSegs-1].length -1 ) & kOHCIPageMask);
-				
-                pageSelectMask = kOHCIPageSize;	// ie. set bit 13
-                physPageEnd = (segs[numSegs-1].location  + segs[numSegs-1].length) & kOHCIPageMask;
-            }
-        }
-        
-        // Save this frame's Page so that we can use it when the next frame is process to compare and see
-        // if they are different
-        //
-        prevFramesPage = (segs[numSegs-1].location  + segs[numSegs-1].length) & kOHCIPageMask;
-        
-        if ( (curFrameInTD > 7) || needNewITD || (useUpdateFrequency && (curFrameInTD >= updateFrequency)) ) 
-		{
-            // Need to start a new TD
-            //
-            itdFlags |= (curFrameInTD-1) << kOHCIITDControl_FCPhase;
-            OSWriteLittleInt32(&pTailITD->pShared->bufferEnd, 0, lastPhysical);
-            pNewITD = AllocateITD();
-            USBLog(7, "AppleUSBOHCI[%p]::UIMCreateIsochTransfer(LL) - new iTD %p (curFrameInRequest: %ld, curFrameInTD: %ld, needNewITD: %d, updateFrequency: %ld", this, pNewITD, curFrameInRequest, curFrameInTD, needNewITD, updateFrequency);
-            if (pNewITD == NULL) 
-			{
-                curFrameInTD = 0;
-                needNewITD = true;	// To simplify test at top of loop.
-                status = kIOReturnNoMemory;
-				break;
-            }
-            // Handy for debugging transfer lists
-            itdFlags |= (kOHCIGTDConditionNotAccessed << kOHCIGTDControl_CCPhase);
-            
-            // In the past, we set the DI bits to 111b at this point, so that we only interrupted in the last transfer.  However, this presents a problem
-            // for low latency in the case of a transfer having multiple TDs:  When we abort a pipe, there might be a partial transfer 
-            // in the done queue that has not caused an interrupt.  If we then unmap the frame list (because our user client died), then
-            // when another TD completes, we will process this orphaned low latency TD and hang/panic 'cause we'll try to access the unmapped memory.
-            // Hence, we need to make sure that we interrupt after every TD.
-			
-            curFrameInTD = 0;
-            needNewITD = true;	// To simplify test at top of loop.
-			
-            OSWriteLittleInt32(&pTailITD->pShared->flags, 0, itdFlags);
-			
-            pTailITD->completion.action = NULL;
-			pTailITD->requestFromRosettaClient = requestFromRosettaClient;
-			
-            //print_itd(pTailITD);
-            pTailITD = pTailITD->pLogicalNext;		// this is the "old" pNewTD
-            OSWriteLittleInt32(&pTailITD->pShared->nextTD, 0, pNewITD->pPhysical);	// link to the "new" pNewTD
-            pTailITD->pLogicalNext = pNewITD;
-            continue;		// start over
-        }
-
-        // At this point we know we have a frame which will fit into the current TD.
-        // calculate the buffer offset for the beginning of this frame
-        //
-        OSWriteLittleInt16(&pTailITD->pShared->offset[curFrameInTD], 0,
-                                pageOffset |							// offset
-                                pageSelectMask |						// offset from BP0 or BufferEnd
-                                (kOHCIITDOffsetConditionNotAccessed << kOHCIITDOffset_CCPhase) 	// mark as unused
-                                );	
-
-        // adjust counters and calculate the physical offset of the end of the frame for the next time around the loop
-        //
-        curFrameInRequest++;
-        curFrameInTD++;
-        lastPhysical = segs[numSegs-1].location + segs[numSegs-1].length - 1;
-    }			
-
-    if (status != kIOReturnSuccess)
-    {
-        // unlink the TDs, unlock the buffer, and return the status
-        pNewITD = pTailITD->pLogicalNext;	// point to the "old" pNewTD, which will also get deallocated
-        pTempITD = (AppleOHCIIsochTransferDescriptorPtr)pED->pLogicalTailP;
-        pTailITD = pTempITD->pLogicalNext;	// don't deallocate the real tail!
-        pTempITD->pLogicalNext = NULL;		// just to make sure
-        pTempITD->pShared->nextTD = NULL;	// just to make sure
-        while (pTailITD != pNewITD)
-        {
-            pTempITD = pTailITD;
-            pTailITD = pTailITD->pLogicalNext;
-            DeallocateITD(pTempITD);
-        }
-    }
-    else
-    {
-        // we have good status, so let's kick off the machine
-        // we need to tidy up the last TD, which is not yet complete
-        itdFlags |= (curFrameInTD-1) << kOHCIITDControl_FCPhase;
-
-        OSWriteLittleInt32(&pTailITD->pShared->flags, 0, itdFlags);
-        OSWriteLittleInt32(&pTailITD->pShared->bufferEnd, 0, lastPhysical);
-        pTailITD->completion = completion;
-		pTailITD->requestFromRosettaClient = requestFromRosettaClient;
-        
-        //print_itd(pTailITD);
-        // Make new descriptor the tail
-        pED->pLogicalTailP = pNewITD;
-        OSWriteLittleInt32(&pED->pShared->tdQueueTailPtr, 0, pNewITD->pPhysical);
-    }
-
-    return status;
-	********/
 }
 
 
@@ -2591,7 +1931,9 @@ AppleUSBOHCI::UIMCreateIsochTransfer(IOUSBIsocCommand *command)
 	UInt64										offset;
 	IODMACommand::Segment64						segments64[2];
 	IODMACommand::Segment32						segments32[2];
-    
+	UInt32										edFlags;
+	UInt32										maxPacketSize;
+	
     if ( (frameCount == 0) || (frameCount > 1000) )
     {
         USBLog(3,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer bad frameCount: %ld", this, frameCount);
@@ -2631,6 +1973,9 @@ AppleUSBOHCI::UIMCreateIsochTransfer(IOUSBIsocCommand *command)
         return kIOUSBEndpointNotFound;
     }
 	
+	edFlags = USBToHostLong(pED->pShared->flags);
+	maxPacketSize = ( edFlags & kOHCIEDControl_MPS) >> kOHCIEDControl_MPSPhase;
+    
     if ( lowLatency && (updateFrequency == 0))
         useUpdateFrequency = false;
 	
@@ -2666,7 +2011,7 @@ AppleUSBOHCI::UIMCreateIsochTransfer(IOUSBIsocCommand *command)
     //
     for ( i = 0; i< frameCount; i++)
     {
-        if ((lowLatency ? pLLFrames[i].frReqCount : pFrames[i].frReqCount) > kUSBMaxFSIsocEndpointReqCount)
+        if ((lowLatency ? pLLFrames[i].frReqCount : pFrames[i].frReqCount) > maxPacketSize)
         {
             USBLog(3,"AppleUSBOHCI[%p]::UIMCreateIsochTransfer Isoch frame (%ld) too big %d", this, i + 1, (lowLatency ? pLLFrames[i].frReqCount : pFrames[i].frReqCount));
             return kIOReturnBadArgument;
@@ -2835,7 +2180,9 @@ AppleUSBOHCI::UIMCreateIsochTransfer(IOUSBIsocCommand *command)
             else
 			{
                 if (pageSelectMask == 0 )
+				{
                     USBLog(8,"Using our page crossing for this TD (0x%lx)", (UInt32)(segments32[numSegs-1].fIOVMAddr + segments32[numSegs-1].fIOVMAddr -1 ) & kOHCIPageMask);
+				}
 				
                 pageSelectMask = kOHCIPageSize;	// ie. set bit 13
                 physPageEnd = (segments32[numSegs-1].fIOVMAddr  + segments32[numSegs-1].fLength) & kOHCIPageMask;
@@ -2934,3 +2281,195 @@ AppleUSBOHCI::UIMCreateIsochTransfer(IOUSBIsocCommand *command)
 	
     return status;
 }
+
+
+
+// this call is not gated, so we need to gate it ourselves
+IOReturn
+AppleUSBOHCI::GetFrameNumberWithTime(UInt64* frameNumber, AbsoluteTime *theTime)
+{
+	if (!_commandGate)
+		return kIOReturnUnsupported;
+		
+	return _commandGate->runAction(GatedGetFrameNumberWithTime, frameNumber, theTime);
+}
+
+
+
+// here is the gated version
+IOReturn
+AppleUSBOHCI::GatedGetFrameNumberWithTime(OSObject *owner, void* arg0, void* arg1, void* arg2, void* arg3)
+{
+	AppleUSBOHCI		*me = (AppleUSBOHCI*)owner;
+	UInt64				*frameNumber = (UInt64*)arg0;
+	AbsoluteTime		*theTime = (AbsoluteTime*)arg1;
+	
+	*frameNumber = me->_anchorFrame;
+	*theTime = me->_anchorTime;
+	return kIOReturnSuccess;
+}
+
+
+IOReturn
+AppleUSBOHCI::UIMEnableAddressEndpoints(USBDeviceAddress address, bool enable)
+{
+    AppleOHCIEndpointDescriptorPtr	pEDQueue;
+	UInt32							edFlags;
+	int								i;
+
+	USBLog(2, "AppleUSBOHCI[%p]::UIMEnableAddressEndpoints(%d, %s)", this, (int)address, enable ? "true" : "false");
+	// look through the lists one at a time - Control first
+    pEDQueue = _pControlHead;
+    while (pEDQueue != _pControlTail)
+    {
+		edFlags = USBToHostLong(pEDQueue->pShared->flags);
+        if ((edFlags & kOHCIEDControl_FA) == address)
+		{
+			USBLog(2, "AppleUSBOHCI[%p]::UIMEnableAddressEndpoints - found control ED[%p] which matches - %s", this, pEDQueue, enable ? "enabling" : "disabling");
+			if (enable)
+			{
+				if (!(edFlags & kOHCISkipped))
+				{
+					USBLog(2, "AppleUSBOHCI[%p]::UIMEnableAddressEndpoints - HMMM - it was NOT marked as skipped..", this);
+				}
+				edFlags &= ~kOHCISkipped;
+			}
+			else
+			{
+				if (edFlags & kOHCISkipped)
+				{
+					USBLog(2, "AppleUSBOHCI[%p]::UIMEnableAddressEndpoints - HMMM - it was already marked as skipped..", this);
+				}
+				edFlags |= kOHCISkipped;
+			}
+			pEDQueue->pShared->flags = HostToUSBLong(edFlags);
+			IOSync();
+		}
+		pEDQueue = (AppleOHCIEndpointDescriptorPtr) pEDQueue->pLogicalNext;
+	}
+	
+	// now bulk
+    pEDQueue = _pBulkHead;
+    while (pEDQueue != _pBulkTail)
+    {
+		edFlags = USBToHostLong(pEDQueue->pShared->flags);
+        if ((edFlags & kOHCIEDControl_FA) == address)
+		{
+			USBLog(2, "AppleUSBOHCI[%p]::UIMEnableAddressEndpoints - found Bulk ED[%p] which matches - %s", this, pEDQueue, enable ? "enabling" : "disabling");
+			if (enable)
+			{
+				if (!(edFlags & kOHCISkipped))
+				{
+					USBLog(2, "AppleUSBOHCI[%p]::UIMEnableAddressEndpoints - HMMM - it was NOT marked as skipped..", this);
+				}
+				edFlags &= ~kOHCISkipped;
+			}
+			else
+			{
+				if (edFlags & kOHCISkipped)
+				{
+					USBLog(2, "AppleUSBOHCI[%p]::UIMEnableAddressEndpoints - HMMM - it was already marked as skipped..", this);
+				}
+				edFlags |= kOHCISkipped;
+			}
+			pEDQueue->pShared->flags = HostToUSBLong(edFlags);
+			IOSync();
+		}
+		pEDQueue = (AppleOHCIEndpointDescriptorPtr) pEDQueue->pLogicalNext;
+	}
+	
+	// now interrupt
+    for (i = 0; i < 63; i++)
+    {
+        pEDQueue = _pInterruptHead[i].pHead;
+        
+        while (pEDQueue != _pInterruptHead[i].pTail)
+        {
+			edFlags = USBToHostLong(pEDQueue->pShared->flags);
+
+		   if ((edFlags & kOHCIEDControl_FA) == address)
+			{
+				USBLog(2, "AppleUSBOHCI[%p]::UIMEnableAddressEndpoints - found Interrupt ED[%p] which matches - %s", this, pEDQueue, enable ? "enabling" : "disabling");
+				if (enable)
+				{
+					if (!(edFlags & kOHCISkipped))
+					{
+						USBLog(2, "AppleUSBOHCI[%p]::UIMEnableAddressEndpoints - HMMM - it was NOT marked as skipped..", this);
+					}
+					edFlags &= ~kOHCISkipped;
+				}
+				else
+				{
+					if (edFlags & kOHCISkipped)
+					{
+						USBLog(2, "AppleUSBOHCI[%p]::UIMEnableAddressEndpoints - HMMM - it was already marked as skipped..", this);
+					}
+					edFlags |= kOHCISkipped;
+				}
+				pEDQueue->pShared->flags = HostToUSBLong(edFlags);
+				IOSync();
+			}
+            pEDQueue = pEDQueue->pLogicalNext;
+        }
+    }
+	return kIOReturnSuccess;
+}
+
+
+
+IOReturn
+AppleUSBOHCI::UIMEnableAllEndpoints(bool enable)
+{
+    AppleOHCIEndpointDescriptorPtr	pEDQueue;
+	UInt32							edFlags;
+	int								i;
+
+	USBLog(2, "AppleUSBOHCI[%p]::UIMEnableAllEndpoints(%s)", this, enable ? "true" : "false");
+	// look through the lists one at a time - Control first
+    pEDQueue = _pControlHead;
+    while (pEDQueue != _pControlTail)
+    {
+		edFlags = USBToHostLong(pEDQueue->pShared->flags);
+		if ((edFlags & kOHCISkipped) && (edFlags & kOHCIEDControl_FA))
+		{
+			USBLog(2, "AppleUSBOHCI[%p]::UIMEnableAllEndpoints - found skipped Control ED[%p] for ADDR[%d] ", this, pEDQueue, (int)(edFlags & kOHCIEDControl_FA));
+			edFlags &= ~kOHCISkipped;
+			pEDQueue->pShared->flags = HostToUSBLong(edFlags);
+			IOSync();
+		}
+		
+		pEDQueue = (AppleOHCIEndpointDescriptorPtr) pEDQueue->pLogicalNext;
+	}
+    pEDQueue = _pBulkHead;
+    while (pEDQueue != _pBulkTail)
+    {
+		edFlags = USBToHostLong(pEDQueue->pShared->flags);
+		if ((edFlags & kOHCISkipped) && (edFlags & kOHCIEDControl_FA))
+		{
+			USBLog(2, "AppleUSBOHCI[%p]::UIMEnableAllEndpoints - found skipped Bulk ED[%p] for ADDR[%d] ", this, pEDQueue, (int)(edFlags & kOHCIEDControl_FA));
+			edFlags &= ~kOHCISkipped;
+			pEDQueue->pShared->flags = HostToUSBLong(edFlags);
+			IOSync();
+		}
+		
+		pEDQueue = (AppleOHCIEndpointDescriptorPtr) pEDQueue->pLogicalNext;
+	}
+    for (i = 0; i < 63; i++)
+    {
+        pEDQueue = _pInterruptHead[i].pHead;
+        
+        while (pEDQueue != _pInterruptHead[i].pTail)
+        {
+			edFlags = USBToHostLong(pEDQueue->pShared->flags);
+			if ((edFlags & kOHCISkipped) && (edFlags & kOHCIEDControl_FA))
+			{
+				USBLog(2, "AppleUSBOHCI[%p]::UIMEnableAllEndpoints - found skipped Interrupt ED[%p] for ADDR[%d] ", this, pEDQueue, (int)(edFlags & kOHCIEDControl_FA));
+				edFlags &= ~kOHCISkipped;
+				pEDQueue->pShared->flags = HostToUSBLong(edFlags);
+				IOSync();
+			}
+            pEDQueue = pEDQueue->pLogicalNext;
+        }
+    }
+	return kIOReturnSuccess;
+}	

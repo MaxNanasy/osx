@@ -37,6 +37,7 @@ public:
     UInt16										pollingRate;			// For interrupt endpoints.
     UInt8										direction;
     UInt8										type;					// Control, interrupt, etc.
+	UInt8										interruptSlot;			// index into the interrupt queue head tree iff type is kUSBInterrupt
     bool										stalled;
     
     // AbsoluteTime								timestamp;

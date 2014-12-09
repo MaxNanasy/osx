@@ -28,7 +28,7 @@
 @implementation DecodeAudioInterfaceDescriptor
 +(void)decodeBytes:(UInt8 *)descriptor forDevice:(BusProbeDevice *)thisDevice {
     GenericAudioDescriptorPtr			desc = (GenericAudioDescriptorPtr) descriptor;
-	auto AudioCtrlHdrDescriptorPtr		pAudioHdrDesc;
+    auto AudioCtrlHdrDescriptorPtr		pAudioHdrDesc;
 	pAudioHdrDesc = (AudioCtrlHdrDescriptorPtr)desc;
 
 	if ( [[thisDevice lastInterfaceClassInfo]protocolNum] < 0x20 )
@@ -515,7 +515,7 @@ void decodeBytes10( UInt8 *descriptor, BusProbeDevice * thisDevice ) {
 					ch = ((pAudioFeatureDesc->descLen - 6)/n) - 1;
 				}
                 ch = ((pAudioFeatureDesc->descLen - 7)/n) - 1;
-                sprintf((char *)buf,	"%u", ch );
+					sprintf((char *)buf,	"%u", ch );
                 [thisDevice addProperty:"Number of Channels (ch):" withValue:buf atDepth:INTERFACE_LEVEL+1];
 
                 p=&pAudioFeatureDesc->descControls[0];

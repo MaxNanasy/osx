@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004-2006 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2004-2007 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -46,7 +46,7 @@ extern "C" {
 
 #include <IOKit/usb/USB.h>
 #include <IOKit/usb/USBHub.h>
-#include <IOKit/usb/IOUSBControllerV2.h>
+#include <IOKit/usb/IOUSBControllerV3.h>
 
 #include "UHCI.h"
 #include "AppleUSBEHCI.h"
@@ -69,7 +69,7 @@ class AppleUSBUHCIDMACommand;
 #undef USBError
 void kprintf(const char *format, ...)
 __attribute__((format(printf, 1, 2)));
-#define USBLog( LEVEL, FORMAT, ARGS... )  if ((LEVEL) <= 2) { kprintf( FORMAT "\n", ## ARGS ) ; }
+#define USBLog( LEVEL, FORMAT, ARGS... )  if ((LEVEL) <= UHCI_USE_KPRINTF) { kprintf( FORMAT "\n", ## ARGS ) ; }
 #define USBError( LEVEL, FORMAT, ARGS... )  { kprintf( FORMAT "\n", ## ARGS ) ; }
 #endif
 
@@ -215,23 +215,6 @@ enum
 	kUHCITimeoutForPortRecovery = 2						// After 2 seconds, forget we applied the port recovery code
 };    
 
-/*
- * Power management.
- */
-
-enum
-{
-    kUHCIPowerLevelSuspend		= 0,
-    kUHCIPowerLevelRunning		= 1,
-    kUHCIPowerLevelIdleSuspend          = 2
-};
-
-enum
-{
-    kUHCIBusStateOff		= 0,
-    kUHCIBusStateSuspended	= 1,
-    kUHCIBusStateRunning	= 2
-};
 
 /*
  * Errata bits.  Eventually this should move into the USB family
@@ -243,27 +226,19 @@ enum
 };
 
 
-struct UHCIRHInterruptTransaction 
-{
-    IOMemoryDescriptor *		buf;
-    UInt32						bufLen;
-    IOUSBCompletion				completion;
-};
-
-#define kMaxOutstandingTrans 4
-
-class AppleUSBUHCI : public IOUSBControllerV2
+class AppleUSBUHCI : public IOUSBControllerV3
 {
     OSDeclareDefaultStructors(AppleUSBUHCI)
 
 
 private:
-    void ioWrite8(UInt16 offset, UInt8 value);
-    void ioWrite16(UInt16 offset, UInt16 value);
-    void ioWrite32(UInt16 offset, UInt32 value);
-    UInt8 ioRead8(UInt16 offset);
-    UInt16 ioRead16(UInt16 offset);
-    UInt32 ioRead32(UInt16 offset);
+    void				ioWrite8(UInt16 offset, UInt8 value);
+    void				ioWrite16(UInt16 offset, UInt16 value);
+    void				ioWrite32(UInt16 offset, UInt32 value);
+    UInt8				ioRead8(UInt16 offset);
+    UInt16				ioRead16(UInt16 offset);
+    UInt32				ioRead32(UInt16 offset);
+    void				showRegisters(UInt32 level, const char *s);
 
     inline void Command(UInt16 cmd) {
       ioWrite16(kUHCI_CMD, cmd);
@@ -288,7 +263,6 @@ private:
 
 
 protected:
-    IOPCIDevice						*_device;
     IOMemoryMap						*_ioMap;
     IOPhysicalAddress				_ioPhysAddress;
     IOVirtualAddress				_ioVirtAddress;
@@ -304,9 +278,6 @@ protected:
     const char *					_deviceName;
     IOFilterInterruptEventSource	*_interruptSource;
     bool							_uimInitialized;
-    bool							_uhciAvailable;
-    bool							_idleSuspend;
-	bool							_wakingFromHibernation;
     
 	queue_head_t					_cbiAlignmentBuffers;			// alignment buffers for control/bulk/interrupt (64 byte buffers)
 	queue_head_t					_isochAlignmentBuffers;			// alignment buffers for isoch (1024 byte buffers)
@@ -340,6 +311,12 @@ protected:
     IOUSBControllerListElement		*_logicalFrameList[kUHCI_NVFRAMES];		// Virtual frame list - each of which points to a list element
 	IOPhysicalAddress				*_frameList;							// list of pointers to the shared frame list
     
+	//Rollover interrupt QH+TD, this is a static 'dummy' QH that will cause the UHCI 
+	//controller to generate a hardware interrupt.  It is statically inserted at 
+	//the begining of the frame list (index 0). 
+	AppleUHCIQueueHead				*_rolloverQH;
+	AppleUHCITransferDescriptor		*_rolloverTD;
+	
     // Queue management
     AppleUHCIQueueHead				*_lastQH;
     AppleUHCIQueueHead				*_bulkQHStart;
@@ -348,6 +325,9 @@ protected:
     AppleUHCIQueueHead				*_fsControlQHEnd;
     AppleUHCIQueueHead				*_lsControlQHStart;
     AppleUHCIQueueHead				*_lsControlQHEnd;
+	
+	// disabled Queue Head list
+    AppleUHCIQueueHead				*_disabledQHList;
     
     // Interrupt queues
     AppleUHCIQueueHead					*_intrQH[kUHCI_NINTR_QHS];
@@ -364,30 +344,24 @@ protected:
 	AppleUHCIQueueHead					*_pFreeQH;
 	AppleUHCIQueueHead					*_pLastFreeQH;
 	
-	// EHCI controller (if we are a companion)
-	AppleUSBEHCI						*_ehciController;
-	
     IOSimpleLock *						_isochScheduleLock;
     IOSimpleLock *						_wdhLock;
     UInt16								_outSlot;
 	UInt32								_controlBulkTransactionsOut;
-    thread_call_t						_rootHubCreationThread;
 
     IOReturn TDToUSBError(UInt32 error);
     void CompleteIsoc(IOUSBIsocCompletion completion, IOReturn status, void *pFrames);
     
-    /* Root hub support. */
-    IOTimerEventSource						*_rhTimer;
-    UInt16									_rootFunctionNumber;
-	UInt8									_rootHubPollingRate;
-    UInt16									_lastPortStatus[kUHCI_NUM_PORTS];
-    bool									_portWasReset[kUHCI_NUM_PORTS];
-    bool									_portSuspendChange[kUHCI_NUM_PORTS];
-    AbsoluteTime							_rhChangeTime;
-    struct UHCIRHInterruptTransaction		_outstandingTrans[kMaxOutstandingTrans];
-    IOLock *								_intLock;
-	bool									_previousPortRecoveryAttempted[kUHCI_NUM_PORTS];
-    AbsoluteTime							_portRecoveryTime[kUHCI_NUM_PORTS];
+    // Root hub support.
+    UInt16								_rootFunctionNumber;
+    UInt16								_lastPortStatus[kUHCI_NUM_PORTS];
+    bool								_portWasReset[kUHCI_NUM_PORTS];
+    bool								_portSuspendChange[kUHCI_NUM_PORTS];
+    AbsoluteTime						_rhChangeTime;
+	bool								_previousPortRecoveryAttempted[kUHCI_NUM_PORTS];
+    AbsoluteTime						_portRecoveryTime[kUHCI_NUM_PORTS];
+	bool								_rhPortBeingResumed[kUHCI_NUM_PORTS];			// while we are outside the WL resuming a root hub port
+	thread_call_t						_rhResumePortTimerThread[kUHCI_NUM_PORTS];		// thread off the WL gate to resume a RH port
 
 	// Isoch support
 	volatile AppleUHCIIsochTransferDescriptor	*_savedDoneQueueHead;				// saved by the Filter Interrupt routine
@@ -395,20 +369,24 @@ protected:
     volatile UInt32								_consumerCount;						// Counter used to synchronize reading of the done queue between filter (producer) and action (consumer)
     volatile bool								_filterInterruptActive;				// in the filter interrupt routine
 	bool										_inAbortIsochEP;
-    UInt8										_uhciBusState;
 	
-	
+	// variables to get the anchor frame
+	// used to implement GetFrameNumberWithTime
+	AbsoluteTime							_tempAnchorTime;
+	AbsoluteTime							_anchorTime;
+	UInt64									_tempAnchorFrame;
+	UInt64									_lastIrqFrame;
+	UInt32									_lastIrqFrameLow;
+	UInt64									_anchorFrame;
+
+	void                            UpdateFrameNumberWithTime(void);
+	UInt64                          GetFrameNumberInternal(void);
+
     IOReturn						RHAbortEndpoint (short endpointNumber, short direction);
     IOReturn						RHDeleteEndpoint (short endpointNumber, short direction);
-    IOReturn						RHCreateInterruptTransfer(IOUSBCommand * command);
-    IOReturn						RHCreateInterruptEndpoint(short endpointNumber, UInt8 direction, short speed, UInt16 maxPacketSize, short pollingRate);
-    static void						RHTimerFired(OSObject *owner, IOTimerEventSource *sender);
     AbsoluteTime					RHLastPortStatusChanged(void);
     bool							RHAreAllPortsDisconnectedOrSuspended(void);
     void							RHCheckStatus(void);
-
-	static void						RootHubCreationEntry(OSObject *target);
-	void							RootHubCreation();
 
     // Port numbers are 1-based
     void							RHEnablePort(int port, bool enable);
@@ -427,8 +405,8 @@ protected:
         
     // UIM support
     void							UIMProcessDoneQueue(IOUSBCompletionAction safeAction=0);
-    void							UIMRootHubStatusChange( void );
-    void							UIMRootHubStatusChange(bool abort);
+    virtual void					UIMRootHubStatusChange( void );
+	virtual void					UIMRootHubStatusChange( bool abort );
     
     AppleUHCIQueueHead				*FindQueueHead(short functionNumber, short endpointNumber, UInt8 direction, UInt8 type, AppleUHCIQueueHead **ppQHPrev = NULL);
 	IOReturn						UnlinkQueueHead(AppleUHCIQueueHead *pQH, AppleUHCIQueueHead *pQHPrev);
@@ -499,22 +477,12 @@ protected:
 	/*
      * Power management.
      */
-    bool									_unloadUIMAcrossSleep;
-    bool									_remoteWakeupOccurred;
     UInt32									_saveFrameAddress;
     UInt16									_saveFrameNumber;
 	UInt16									_saveInterrupts;
     IONotifier								*_powerDownNotifier;
 	UInt32									_ExpressCardPort;					// Port number of ExpressCard (0 if no ExpressCard on this controller)
 	bool									_badExpressCardAttached;			// True if a driver has identified a bad ExpressCard
-    
-    virtual void							initForPM (IOPCIDevice *provider);
-    unsigned long							maxCapabilityForDomainState ( IOPMPowerFlags domainState );
-    unsigned long							initialPowerStateForDomainState ( IOPMPowerFlags domainState );
-    static IOReturn							PowerDownHandler(void *target, void *refCon, UInt32 messageType, IOService *service,
-																	void *messageArgument, vm_size_t argSize);
-    
-    virtual IOReturn						setPowerState( unsigned long powerStateOrdinal, IOService* whatDevice );
 	
 	UInt32									ExpressCardPort( IOService * provider );
     
@@ -528,14 +496,15 @@ public:
     virtual void							stop( IOService * provider );
     virtual bool							finalize(IOOptionBits options);
     virtual IOReturn						message( UInt32 type, IOService * provider,  void * argument = 0 );
+	virtual IOReturn						powerStateWillChangeTo ( IOPMPowerFlags, unsigned long, IOService* );
+	virtual IOReturn						powerStateDidChangeTo ( IOPMPowerFlags, unsigned long, IOService* );
+	virtual void							powerChangeDone ( unsigned long fromState);
 
     /*
      * UIM methods
      */
     IOReturn								UIMInitialize(IOService * provider);
     IOReturn								UIMFinalize();
-    IOReturn								UIMInitializeForPowerUp();
-    IOReturn								UIMFinalizeForPowerDown();
 
 	IOReturn								DeallocateITD(AppleUHCIIsochTransferDescriptor *);
 
@@ -742,6 +711,31 @@ public:
     virtual IOReturn								GetLowLatencyOptionsAndPhysicalMask(IOOptionBits *optionBits, mach_vm_address_t *physicalMask);
 	virtual IODMACommand							*GetNewDMACommand();
     virtual void									PutTDonDoneQueue(IOUSBControllerIsochEndpoint* pED, IOUSBControllerIsochListElement *pTD, bool checkDeferred);
+	
+	// this call is not gated, so we need to gate it ourselves
+	virtual IOReturn								GetFrameNumberWithTime(UInt64* frameNumber, AbsoluteTime *theTime);
+	// here is the gated version
+	static IOReturn									GatedGetFrameNumberWithTime(OSObject *owner, void* arg0, void* arg1, void* arg2, void* arg3);
+
+	// separated this from initForPM
+	void											CheckSleepCapability(void);
+
+	// these are for handling a root hub resume without hanging out in the WL for 20 ms
+	static void			RHResumePortTimerEntry(OSObject *target, thread_call_param_t port);
+	void				RHResumePortTimer(UInt32 port);
+	static IOReturn		RHResumePortCompletionEntry(OSObject *target, void *param1, void *param2, void *param3, void *param4);
+	IOReturn			RHResumePortCompletion(UInt32 port);
+
+	// in the new IOUSBControllerV3 class
+	virtual	IOReturn				ResetControllerState(void);
+	virtual IOReturn				RestartControllerFromReset(void);
+	virtual	IOReturn				SaveControllerStateForSleep(void);
+	virtual	IOReturn				RestoreControllerStateFromSleep(void);
+	virtual IOReturn				DozeController(void);
+	virtual IOReturn				WakeControllerFromDoze(void);
+	virtual IOReturn				UIMEnableAddressEndpoints(USBDeviceAddress address, bool enable);
+	virtual IOReturn				UIMEnableAllEndpoints(bool enable);
+	virtual IOReturn				EnableInterruptsFromController(bool enable);
 };
 
 #endif /* ! _IOKIT_AppleUSBUHCI_H */

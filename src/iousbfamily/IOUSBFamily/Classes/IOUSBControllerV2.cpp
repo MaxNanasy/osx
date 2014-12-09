@@ -370,6 +370,7 @@ IOReturn IOUSBControllerV2::OpenPipe(USBDeviceAddress address, UInt8 speed,
 }
 
 
+
 IOReturn 
 IOUSBControllerV2::DoCreateEP(OSObject *owner,
 							  void *arg0, void *arg1,
@@ -416,11 +417,11 @@ IOUSBControllerV2::DoCreateEP(OSObject *owner,
             break;
 			
         case kUSBIsoc:
-		  {
-
+		{			
 			if (speed == kUSBDeviceSpeedHigh)
 			{
-
+				UInt32		interval;
+				
 				// Filter out cases that violate the USB spec:
 				if ((endpoint->interval < 1) || (endpoint->interval > 16))
 				{
@@ -431,7 +432,10 @@ IOUSBControllerV2::DoCreateEP(OSObject *owner,
 					break;
 				}
 
-				USBLog(4, "%s[%p]::DoCreateEP - Creating a High-Speed Isoch EP with raw interval %u", me->getName(), me, (unsigned int )endpoint->interval);
+				interval = (1 << (endpoint->interval - 1));
+
+				USBLog(4, "%s[%p]::DoCreateEP - Creating a High-Speed Isoch EP with interval %u [raw %u]", me->getName(), me, 
+					   (unsigned int )interval, (unsigned int )endpoint->interval);
 
 			}
 			else
@@ -465,14 +469,15 @@ IOUSBControllerV2::DoCreateEP(OSObject *owner,
 }
 
 
+
 IOReturn 
 IOUSBControllerV2::CreateDevice(	IOUSBDevice 		*newDevice,
 									USBDeviceAddress	deviceAddress,
-									UInt8		 	maxPacketSize,
-									UInt8			speed,
-									UInt32			powerAvailable,
-									USBDeviceAddress		hub,
-									int      port)
+									UInt8				maxPacketSize,
+									UInt8				speed,
+									UInt32				powerAvailable,
+									USBDeviceAddress	hub,
+									int					port)
 {
     USBLog(5,"%s[%p]::CreateDevice, new method called with hub:%d, port:%d", getName(), this, hub, port);
     
@@ -499,6 +504,8 @@ IOUSBControllerV2::CreateDevice(	IOUSBDevice 		*newDevice,
     
     return (super::CreateDevice(newDevice, deviceAddress, maxPacketSize, speed, powerAvailable));
 }
+
+
 
 IOReturn 
 IOUSBControllerV2::ConfigureDeviceZero(UInt8 maxPacketSize, UInt8 speed, USBDeviceAddress hub, int port)
@@ -1069,7 +1076,7 @@ IOUSBControllerV2::ReturnIsochDoneQueue(IOUSBControllerIsochEndpoint* pEP)
 	}
     while(pTD)
     {
-		USBLog(7, "IOUSBControllerV2[%p]::ReturnIsocDoneQueue: TD %p", this, pTD);
+		USBLog(7, "IOUSBControllerV2[%p]::ReturnIsocDoneQueue: TD %p", this, pTD); 
 		if( pTD->_completion.action != NULL)
 		{
 			
@@ -1078,26 +1085,26 @@ IOUSBControllerV2::ReturnIsochDoneQueue(IOUSBControllerIsochEndpoint* pEP)
 				
 			if (pEP->accumulatedStatus == kIOUSBBufferUnderrunErr)
 			{
-				USBLog(1, "IOUSBControllerV2[%p]::ReturnIsocDoneQueue - kIOReturnBufferUnderrunErr (PCI issue perhaps)", this);
+				USBLog(1, "IOUSBControllerV2[%p]::ReturnIsocDoneQueue - kIOReturnBufferUnderrunErr (PCI issue perhaps)  Bus: %lx, Address: %d, Endpoint: %d", this, _busNumber, pEP->functionAddress,  pEP->endpointNumber);
 			}
 			if (pEP->accumulatedStatus == kIOUSBBufferOverrunErr)
 			{
-				USBLog(1, "IOUSBControllerV2[%p]::ReturnIsocDoneQueue - kIOReturnBufferOverrunErr (PCI issue perhaps)", this);
+				USBLog(1, "IOUSBControllerV2[%p]::ReturnIsocDoneQueue - kIOReturnBufferOverrunErr (PCI issue perhaps)  Bus: %lx, Address: %d, Endpoint: %d", this, _busNumber, pEP->functionAddress,  pEP->endpointNumber);
 			}
 			if ((pEP->accumulatedStatus == kIOReturnOverrun) && (pEP->direction == kUSBIn))
 			{
-				USBLog(1, "IOUSBControllerV2[%p]::ReturnIsocDoneQueue - kIOReturnOverrun on IN - device babbling?", this);
+				USBLog(1, "IOUSBControllerV2[%p]::ReturnIsocDoneQueue - kIOReturnOverrun on IN - device babbling?  Bus: %lx, Address: %d, Endpoint: %d", this, _busNumber, pEP->functionAddress,  pEP->endpointNumber);
 			}
 
-			USBLog(7, "IOUSBControllerV2[%p]::ReturnIsocDoneQueue- TD (%p) calling handler[%p](target: %p, comp.param: %p, status: %p, pFrames: %p)", this, pTD,
-																pHandler, pTD->_completion.target, pTD->_completion.parameter, (void*)pEP->accumulatedStatus, pFrames);
+			USBLog(7, "IOUSBControllerV2[%p]::ReturnIsocDoneQueue- TD (%p) calling handler[%p](target: %p, comp.param: %p, status: %p, pFrames: %p)  Bus: %lx, Address: %d, Endpoint: %d", this, pTD,
+																pHandler, pTD->_completion.target, pTD->_completion.parameter, (void*)pEP->accumulatedStatus, pFrames, _busNumber, pEP->functionAddress,  pEP->endpointNumber);
 			
 			(*pHandler) (pTD->_completion.target,  pTD->_completion.parameter, pEP->accumulatedStatus, pFrames);
 			
 			_activeIsochTransfers--;
 			if ( _activeIsochTransfers < 0 )
 			{
-				USBLog(1, "IOUSBControllerV2[%p]::ReturnIsocDoneQueue - _activeIsochTransfers went negative (%d).  We lost one somewhere", this, (int)_activeIsochTransfers);
+				USBLog(1, "IOUSBControllerV2[%p]::ReturnIsocDoneQueue - _activeIsochTransfers went negative (%d).  We lost one somewhere  Bus: %lx, Address: %d, Endpoint: %d", this, (int)_activeIsochTransfers, _busNumber, pEP->functionAddress,  pEP->endpointNumber);
 			}
 			else if (!_activeIsochTransfers)
 				requireMaxBusStall(0);										// remove maximum stall restraint on the PCI bus
@@ -1108,7 +1115,9 @@ IOUSBControllerV2::ReturnIsochDoneQueue(IOUSBControllerIsochEndpoint* pEP)
 			if (pEP->accumulatedStatus != kIOReturnAborted)
 			{
 				if (pEP->accumulatedStatus != kIOReturnSuccess && (pEP->accumulatedStatus != kIOReturnUnderrun) )
-					USBLog(6, "IOUSBControllerV2[%p]::ReturnIsocDoneQueue - resetting status from 0x%x", this, pEP->accumulatedStatus);
+				{
+					USBLog(6, "IOUSBControllerV2[%p]::ReturnIsocDoneQueue - resetting status from 0x%x  Bus: %lx, Address: %d, Endpoint: %d", this, pEP->accumulatedStatus, _busNumber, pEP->functionAddress,  pEP->endpointNumber);
+				}
 				pEP->accumulatedStatus = kIOReturnSuccess;
 			}
 			pTD->Deallocate(this);
@@ -1138,7 +1147,7 @@ IOUSBControllerV2::GetNewDMACommand()
 
 
 #define defaultOptionBits						0							// by default we don't need contiguous memory
-#define defaultPhysicalMask						0x00000000FFFFF000ULL		// be default we require memory 4K aligned memory below 4GB
+#define defaultPhysicalMask						0x00000000FFFFF000ULL		// by default we require memory 4K aligned memory below 4GB
 OSMetaClassDefineReservedUsed(IOUSBControllerV2,  21);
 IOReturn
 IOUSBControllerV2::GetLowLatencyOptionsAndPhysicalMask(IOOptionBits *pOptionBits, mach_vm_address_t *pPhysicalMask)
@@ -1149,7 +1158,15 @@ IOUSBControllerV2::GetLowLatencyOptionsAndPhysicalMask(IOOptionBits *pOptionBits
 }
 
 
-OSMetaClassDefineReservedUnused(IOUSBControllerV2,  22);
+OSMetaClassDefineReservedUsed(IOUSBControllerV2,  22);
+IOReturn
+IOUSBControllerV2::GetFrameNumberWithTime(UInt64* frameNumber, AbsoluteTime *theTime)
+{
+	return kIOReturnUnsupported;
+}
+
+
+
 OSMetaClassDefineReservedUnused(IOUSBControllerV2,  23);
 OSMetaClassDefineReservedUnused(IOUSBControllerV2,  24);
 OSMetaClassDefineReservedUnused(IOUSBControllerV2,  25);

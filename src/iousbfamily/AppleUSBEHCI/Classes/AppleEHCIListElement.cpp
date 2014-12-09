@@ -26,6 +26,17 @@
 
 #include "AppleEHCIListElement.h"
 
+// Convert USBLog to use kprintf debugging
+// The switch is in the header file, but the work is done here because the header is included by the companion controllers
+#if EHCI_USE_KPRINTF
+#undef USBLog
+#undef USBError
+void kprintf(const char *format, ...)
+__attribute__((format(printf, 1, 2)));
+#define USBLog( LEVEL, FORMAT, ARGS... )  if ((LEVEL) <= EHCI_USE_KPRINTF) { kprintf( FORMAT "\n", ## ARGS ) ; }
+#define USBError( LEVEL, FORMAT, ARGS... )  { kprintf( FORMAT "\n", ## ARGS ) ; }
+#endif
+
 #undef super
 #define super IOUSBControllerListElement
 // -----------------------------------------------------------------
@@ -76,10 +87,11 @@ void
 AppleEHCIQueueHead::print(int level)
 {
     EHCIQueueHeadSharedPtr shared = GetSharedLogical();
+	UInt32					flags = USBToHostLong(shared->flags);
 	
     super::print(level);
     USBLog(level, "AppleEHCIQueueHead::print - shared.nextQH[%p]", (void*)USBToHostLong(shared->nextQH));
-    USBLog(level, "AppleEHCIQueueHead::print - shared.flags[%p]", (void*)USBToHostLong(shared->flags));
+    USBLog(level, "AppleEHCIQueueHead::print - shared.flags[%p] (ADDR[%d] EP[%d] %s)", (void*)flags, (int)(flags & kEHCIEDFlags_FA), (int)((flags & kEHCIEDFlags_EN) >> kEHCIEDFlags_ENPhase), (flags & kEHCIEDFlags_H) ? "HEAD" : " ");
     USBLog(level, "AppleEHCIQueueHead::print - shared.splitFlags[%p]", (void*)USBToHostLong(shared->splitFlags));
     USBLog(level, "AppleEHCIQueueHead::print - shared.CurrqTDPtr[%p]", (void*)USBToHostLong(shared->CurrqTDPtr));
     USBLog(level, "AppleEHCIQueueHead::print - shared.NextqTDPtr[%p]", (void*)USBToHostLong(shared->NextqTDPtr));
@@ -95,6 +107,7 @@ AppleEHCIQueueHead::print(int level)
     USBLog(level, "AppleEHCIQueueHead::print - shared.extBuffPtr[2][%p]", (void*)USBToHostLong(shared->extBuffPtr[2]));
     USBLog(level, "AppleEHCIQueueHead::print - shared.extBuffPtr[3][%p]", (void*)USBToHostLong(shared->extBuffPtr[3]));
     USBLog(level, "AppleEHCIQueueHead::print - shared.extBuffPtr[4][%p]", (void*)USBToHostLong(shared->extBuffPtr[4]));
+	USBLog(level, "----------------------------------------------------");
 }
 
 
@@ -224,7 +237,6 @@ AppleEHCIIsochTransferDescriptor::UpdateFrameList(AbsoluteTime timeStamp)
     int								i,j;
 	UInt16							*pActCount;
 	UInt8							framesInTD;
-	UInt32							hsInterval;
 	
     ret = _pEndpoint->accumulatedStatus;
 	
@@ -235,8 +247,7 @@ AppleEHCIIsochTransferDescriptor::UpdateFrameList(AbsoluteTime timeStamp)
 		return kIOReturnSuccess;
 	
     pLLFrames = (IOUSBLowLatencyIsocFrame*)_pFrames;
-	hsInterval = (1 << (_pEndpoint->interval - 1));
-    for(i=0, j=0; i < 8; i+= hsInterval, j++)
+    for(i=0, j=0; i < 8; i+= _pEndpoint->interval, j++)
     {
 		if (!framesInTD)
 			break;

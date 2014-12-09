@@ -96,7 +96,7 @@ enum {
     kUHCI_SOF_TIMING    = 0x7F      /* Bits 6:0. */
 };
 
-/* Bits for kUHCI_PORTSCx. */
+// Bits for kUHCI_PORTSCx.
 
 enum {
     kUHCI_PORTSC_SUSPEND    = 0x1000,   // Suspend control

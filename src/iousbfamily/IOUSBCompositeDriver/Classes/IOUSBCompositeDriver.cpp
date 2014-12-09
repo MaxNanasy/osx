@@ -83,12 +83,8 @@ IOUSBCompositeDriver::start(IOService * provider)
     //
     fDevice = OSDynamicCast(IOUSBDevice, provider);
     if (!fDevice)
-		return false;
+	return false;
     
-	// retain ourselves  and our provider in case the device drops off the bus
-	fDevice->retain();
-	retain();
-	
     fExpectingClose = false;
     fNotifier = NULL;
     
@@ -107,9 +103,6 @@ IOUSBCompositeDriver::start(IOService * provider)
     
     USBLog(5, "%s[%p]::start returning %d", getName(), this, configured);
     
-	release();
-	fDevice->release();
-	
     return configured;
 }
 
@@ -259,8 +252,15 @@ IOUSBCompositeDriver::ConfigureDevice()
             cdTemp = fDevice->GetFullConfigurationDescriptor(i);
             if (!cdTemp)
             {
-                USBLog(3,"%s[%p](%s) ConfigureDevice Config %d does not exist", getName(), this, fDevice->getName(), i);
-                continue;
+				USBLog(1, "%s[%p](%s)::ConfigureDevice GetFullConfigDescriptor(%d) returned NULL, retrying", getName(), this, fDevice->getName(), i );
+				IOSleep( 300 );
+				cdTemp = fDevice->GetFullConfigurationDescriptor(i);
+				if ( !cdTemp )
+				{
+					USBError(1, "%s[%p](%s)::ConfigureDevice GetFullConfigDescriptor(%d) returned NULL", getName(), this, fDevice->getName(), i );
+					err = kIOUSBConfigNotFound;
+					goto ErrorExit;
+				}
             }
             
             // Get the MaxPower for this configuration.  If we have enough power for it AND it's greater than our previous power
@@ -277,7 +277,7 @@ IOUSBCompositeDriver::ConfigureDevice()
             }
         }
         
-        if ( !cd )
+		if ( !cd )
         {
 			USBError(1,"USB Low Power Notice:  The device \"%s\" cannot be used because there is not enough power to configure it",fDevice->getName());
             USBLog(3, "%s[%p](%s) ConfigureDevice failed to find configuration by power", getName(), this, fDevice->getName() );

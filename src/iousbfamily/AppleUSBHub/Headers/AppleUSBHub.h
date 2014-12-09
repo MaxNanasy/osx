@@ -33,7 +33,7 @@
 #include <IOKit/usb/USB.h>
 #include <IOKit/usb/USBHub.h>
 #include <IOKit/usb/IOUSBLog.h>
-#include <IOKit/usb/IOUSBRootHubDevice.h>
+#include <IOKit/usb/IOUSBHubPolicyMaker.h>
 
 #include <kern/thread_call.h>
 
@@ -47,15 +47,16 @@
 #undef USBError
 void kprintf(const char *format, ...)
 __attribute__((format(printf, 1, 2)));
-#define USBLog( LEVEL, FORMAT, ARGS... )  if ((LEVEL) <= 5) { kprintf( FORMAT "\n", ## ARGS ) ; }
+#define USBLog( LEVEL, FORMAT, ARGS... )  if ((LEVEL) <= APPLEUSBHUB_USE_KPRINTF) { kprintf( FORMAT "\n", ## ARGS ) ; }
 #define USBError( LEVEL, FORMAT, ARGS... )  { kprintf( FORMAT "\n", ## ARGS ) ; }
 #endif
 
-enum{
-      kErrataCaptiveOKBit = 0x01,
-      kStartupDelayBit =	0x02,
-	  kExtraPowerPossible = 0x04
+enum
+{
+      kErrataCaptiveOKBit = 1,
+      kStartupDelayBit = 2,
 };
+
 
 class IOUSBController;
 class IOUSBDevice;
@@ -64,69 +65,74 @@ class IOUSBPipe;
 class AppleUSBHubPort;
 
 
-class AppleUSBHub : public IOService
+class AppleUSBHub : public IOUSBHubPolicyMaker
 {
     OSDeclareDefaultStructors(AppleUSBHub)
 
     friend class AppleUSBHubPort;
     friend class AppleUSBHSHubUserClient;
 
-    IOUSBController *				_bus;
-    IOUSBDevice *					_device;
-    IOUSBInterface *				_hubInterface;
-    IOUSBConfigurationDescriptor	*_configDescriptor;
-    IOUSBHubDescriptor				_hubDescriptor;
-    USBDeviceAddress				_address;
-    IOUSBHubPortStatus				_hubStatus;
-    IOUSBPipe *						_interruptPipe;
-    IOBufferMemoryDescriptor *		_buffer;
-    IOCommandGate *					_gate;
-    IOWorkLoop *					_workLoop;
-    UInt32							_locationID;
-    UInt32							_inStartMethod;
-	UInt32							_devZeroLockedTimeoutCounter;					// We use this to count down to see when we need to check for a possible stuck dev zero lock
-    bool							_portSuspended;
-    bool							_hubHasBeenDisconnected;
-    bool							_hubIsDead;
-	bool							_abortExpected;
-	UInt32							_retryCount;
-    IOUSBRootHubDevice *			_rootHubParent;									// set if our hub is attached to a root hub
-	
+    IOUSBInterface *					_hubInterface;
+    IOUSBConfigurationDescriptor		*_configDescriptor;
+    IOUSBHubDescriptor					_hubDescriptor;
+    USBDeviceAddress					_address;
+    IOUSBHubPortStatus					_hubStatus;
+    IOUSBPipe *							_interruptPipe;
+    IOBufferMemoryDescriptor *			_buffer;
+    IOCommandGate *						_gate;
+    IOWorkLoop *						_workLoop;
+    UInt32								_locationID;
+    UInt32								_inStartMethod;
+	UInt32								_devZeroLockedTimeoutCounter;					// We use this to count down to see when we need to check for a possible stuck dev zero lock
+    bool								_portSuspended;
+    bool								_hubHasBeenDisconnected;
+    bool								_hubIsDead;
+	bool								_abortExpected;
+	UInt32								_retryCount;
+    IOUSBHubDevice *					_hubParent;										// the hub to which our provider hub is attached (NULL for root hubs)
+    
     // Power stuff
-    bool							_busPowered;
-    bool							_selfPowered;
-    bool							_busPowerGood;
-    bool							_selfPowerGood;
-	AppleRootHubExtraPowerRequest	_extraPower;									// request from a root hub due to a property
-	UInt32							_extraPowerPorts;								// from a property
-	UInt32							_extraPowerRemaining;							// how many milliamps we can still give to any one port
+    bool								_busPowered;
+    bool								_selfPowered;
+    bool								_busPowerGood;
+    bool								_selfPowerGood;
 		
 	// bookkeeping
-    bool							_needToClose;
+    bool								_needToClose;
     
-    UInt32							_powerForCaptive;
-    thread_call_t					_workThread;
-    thread_call_t					_resetPortZeroThread;
-    thread_call_t					_hubDeadCheckThread;
-    thread_call_t					_clearFeatureEndpointHaltThread;
+	bool								_needInterruptRead;						// T if we need a new interrupt read on either a power change or on the last I/O
+	bool								_needToCallResetDevice;
+    
+    UInt32								_powerForCaptive;
+    thread_call_t						_workThread;
+    thread_call_t						_resetPortZeroThread;
+    thread_call_t						_hubDeadCheckThread;
+    thread_call_t						_clearFeatureEndpointHaltThread;
+	thread_call_t						_checkForActivePortsThread;
+	thread_call_t						_waitForPortResumesThread;
 
     // Port stuff
-    UInt8							_readBytes;
-    UInt8							_numCaptive;
-    AppleUSBHubPort **				_ports;						// Allocated at runtime
-    bool							_multiTTs;					// Hub is multiTT capable, and configured.
-    bool							_hsHub;						// our provider is a HS bus
-    bool							_isRootHub;					// we are driving a root hub (needed for test mode)
-    bool							_inTestMode;				// T while we are in test mode
-    IOTimerEventSource *			_timerSource;
-    UInt32							_timeoutFlag;
-    UInt32							_portTimeStamp[32];
-    UInt32							_portWithDevZeroLock;
-    UInt32							_outstandingIO;
+    UInt8								_readBytes;
+    UInt8								_numCaptive;
+    AppleUSBHubPort **					_ports;									// Allocated at runtime
+    bool								_multiTTs;								// Hub is multiTT capable, and configured.
+    bool								_hsHub;									// our provider is a HS bus
+    bool								_inTestMode;							// T while we are in test mode
+	bool								_needToAckSetPowerState;
+	bool								_checkPortsThreadActive;
+    IOTimerEventSource *				_timerSource;
+    UInt32								_timeoutFlag;
+    UInt32								_portTimeStamp[32];
+    UInt32								_portWithDevZeroLock;
+    UInt32								_outstandingIO;
+	UInt32								_raisedPowerStateCount;					// to keep track of when ports want our power state raised
+	UInt32								_outstandingResumes;
+
+	IOLock *							_doPortActionLock;						// Lock to synchronize accesses to any "PortAction" (supend/reenumerate)
 
     // Errata stuff
-    UInt32							_errataBits;
-    UInt32							_startupDelay;
+    UInt32								_errataBits;
+    UInt32								_startupDelay;
     
     static void 	InterruptReadHandlerEntry(OSObject *target, void *param, IOReturn status, UInt32 bufferSizeRemaining);
     void			InterruptReadHandler(IOReturn status, UInt32 bufferSizeRemaining);
@@ -134,31 +140,43 @@ class AppleUSBHub : public IOService
     static void 	ProcessStatusChangedEntry(OSObject *target);
     void			ProcessStatusChanged(void);
 
-    static void		ResetPortZeroEntry(OSObject *target);
-    void			ResetPortZero();
+    static void			ResetPortZeroEntry(OSObject *target);
+    void				ResetPortZero();
     
-    static void 	CheckForDeadHubEntry(OSObject *target);
-    void			CheckForDeadHub();
+    static void			CheckForDeadHubEntry(OSObject *target);
+    void				CheckForDeadHub();
 
-    static void		ClearFeatureEndpointHaltEntry(OSObject *target);
-    void			ClearFeatureEndpointHalt(void);
+    static void			ClearFeatureEndpointHaltEntry(OSObject *target);
+    void				ClearFeatureEndpointHalt(void);
 
-    static void 	TimeoutOccurred(OSObject *owner, IOTimerEventSource *sender);
+    static void			CheckForActivePortsEntry(OSObject *target);
+    void				CheckForActivePorts(void);
+	
+    static void			WaitForPortResumesEntry(OSObject *target);
+    void				WaitForPortResumes(void);
+	
+    static void			TimeoutOccurred(OSObject *owner, IOTimerEventSource *sender);
 
-    IOReturn 		DoDeviceRequest(IOUSBDevRequest *request);
-    UInt32			GetHubErrataBits(void);
+    IOReturn			DoDeviceRequest(IOUSBDevRequest *request);
+    UInt32				GetHubErrataBits(void);
 
-	// bookkeeping
-    void			DecrementOutstandingIO(void);
-    void			IncrementOutstandingIO(void);
-    static IOReturn	ChangeOutstandingIO(OSObject *target, void *arg0, void *arg1, void *arg2, void *arg3);
-
+    void				DecrementOutstandingIO(void);
+    void				IncrementOutstandingIO(void);
+    static IOReturn		ChangeOutstandingIO(OSObject *target, void *arg0, void *arg1, void *arg2, void *arg3);
+    void				LowerPowerState(void);
+    void				RaisePowerState(void);
+    static IOReturn		ChangeRaisedPowerState(OSObject *target, void *arg0, void *arg1, void *arg2, void *arg3);
+    void				IncrementOutstandingResumes(void);
+    void				DecrementOutstandingResumes(void);
+    static IOReturn		ChangeOutstandingResumes(OSObject *target, void *arg0, void *arg1, void *arg2, void *arg3);
+	
     // Hub functions
     void			UnpackPortFlags(void);
     void			CountCaptivePorts(void);
     IOReturn		CheckPortPowerRequirements(void);
     IOReturn		AllocatePortMemory(void);
     IOReturn		StartPorts(void);
+    IOReturn		SuspendPorts(void);
     IOReturn 		StopPorts(void);
     IOReturn		ConfigureHub(void);
 
@@ -175,7 +193,7 @@ class AppleUSBHub : public IOService
 
     void			PrintHubDescriptor(IOUSBHubDescriptor *desc);
 
-    void			FatalError(IOReturn err, char *str);
+    void			FatalError(IOReturn err, const char *str);
     IOReturn		DoPortAction(UInt32 type, UInt32 portNumber, UInt32 options );
     void			StartWatchdogTimer();
     void			StopWatchdogTimer();
@@ -184,15 +202,9 @@ class AppleUSBHub : public IOService
     void			CallCheckForDeadHub(void);
 
     IOUSBHubDescriptor 	GetCachedHubDescriptor() { return _hubDescriptor; }
-    bool				MergeDictionaryIntoProvider(IOService *  provider, OSDictionary *  mergeDict);
-    bool				MergeDictionaryIntoDictionary(OSDictionary *  sourceDictionary,  OSDictionary *  targetDictionary);
 	bool				HubAreAllPortsDisconnectedOrSuspended();
+    bool				IsPortInitThreadActiveForAnyPort();
 	
-	// new power stuff
-	void				AllocateExtraPower();						// used at init time
-	IOReturn			GetExtraPortPower(AppleUSBHubPort *port);
-	IOReturn			ReturnExtraPortPower(AppleUSBHubPort *port);
-    
     // test mode functions, called by the AppleUSBHSHubUserClient
     IOReturn			EnterTestMode();
     IOReturn			LeaveTestMode();
@@ -206,23 +218,33 @@ class AppleUSBHub : public IOService
 	IOReturn			GetPortPower(UInt16 port, UInt32 *on);
 	IOReturn			SetPortPower(UInt16 port, UInt32 on);
 	
+	static const char *	HubMessageToString(UInt32 message);
+	
 public:
 
-    virtual bool	init(OSDictionary * propTable );
-    virtual bool	start(IOService * provider);
-    virtual void 	stop(IOService *  provider);
-    virtual bool 	finalize(IOOptionBits options);
-    virtual IOReturn 	message( UInt32 type, IOService * provider,  void * argument = 0 );
+    //  IOKit methods
+    virtual bool			init(OSDictionary * propTable );
+    virtual bool			start(IOService * provider);
+    virtual void			stop(IOService *  provider);
+    virtual bool			finalize(IOOptionBits options);
+    virtual IOReturn		message( UInt32 type, IOService * provider,  void * argument = 0 );
+	virtual IOReturn		powerStateWillChangeTo ( IOPMPowerFlags capabilities, unsigned long stateNumber, IOService* whatDevice);
+	virtual IOReturn		powerStateDidChangeTo ( IOPMPowerFlags capabilities, unsigned long stateNumber, IOService* whatDevice);
+	virtual void			powerChangeDone ( unsigned long fromState);
 
-    // "new" IOKit methods. Some of these may go away before we ship 1.8.5
-    virtual bool 	willTerminate( IOService * provider, IOOptionBits options );
-    virtual bool 	didTerminate( IOService * provider, IOOptionBits options, bool * defer );
-    virtual bool 	requestTerminate( IOService * provider, IOOptionBits options );
-    virtual bool 	terminate( IOOptionBits options = 0 );
-    virtual void 	free( void );
-    virtual bool 	terminateClient( IOService * client, IOOptionBits options );
-
-    virtual IOUSBDevice * GetDevice(void) { return _device; }
+    virtual bool			willTerminate( IOService * provider, IOOptionBits options );
+    virtual bool			didTerminate( IOService * provider, IOOptionBits options, bool * defer );
+    virtual bool			requestTerminate( IOService * provider, IOOptionBits options );
+    virtual bool			terminate( IOOptionBits options = 0 );
+    virtual void			free( void );
+    virtual bool			terminateClient( IOService * client, IOOptionBits options );
+	
+	// IOUSBHubPolicyMaker methods
+	virtual bool			ConfigureHubDriver(void);
+	virtual IOReturn		HubPowerChange(unsigned long powerStateOrdinal);
+	
+	// inline method
+    IOUSBDevice * GetDevice(void) { return _device; }
 
 };
 

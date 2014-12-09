@@ -2,7 +2,7 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1998-2003 Apple Computer, Inc.  All Rights Reserved.
+ * Copyright (c) 1998-2006 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -22,19 +22,20 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
+
 #include <libkern/OSByteOrder.h>
+
 #include <IOKit/usb/IOUSBLog.h>
+#include <IOKit/usb/IOUSBRootHubDevice.h>
+#include <IOKit/usb/IOUSBHubPolicyMaker.h>
+#include <IOKit/usb/IOUSBControllerV3.h>
 
-#include "IOUSBRootHubDevice.h"
-
-#define super	IOUSBDevice
+#define super	IOUSBHubDevice
 #define self	this
-
-#define _commandGate	_expansionData->_commandGate
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
-OSDefineMetaClassAndStructors( IOUSBRootHubDevice, IOUSBDevice )
+OSDefineMetaClassAndStructors( IOUSBRootHubDevice, IOUSBHubDevice )
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
@@ -74,6 +75,21 @@ IOUSBRootHubDevice::init()
 	
     return true;
  }
+
+
+
+bool
+IOUSBRootHubDevice::InitializeCharacteristics()
+{
+	UInt32			characteristics = kIOUSBHubDeviceIsRootHub;
+	
+	// since i am the root hub, just check my speed and that will be the bus speed
+	if (GetSpeed() == kUSBDeviceSpeedHigh)
+		characteristics |= kIOUSBHubDeviceIsOnHighSpeedBus;
+		
+	SetHubCharacteristics(characteristics);
+	return true;
+}
 
 
 
@@ -127,27 +143,6 @@ IOUSBRootHubDevice::free()
 
 
 IOReturn
-IOUSBRootHubDevice::message( UInt32 type, IOService * provider,  void * argument )
-{
-	if (type == kIOUSBMessageRequestExtraPower)
-	{
-		if (_controller)
-		{
-			USBLog(2, "IOUSBRootHubDevice[%p]::message(kIOUSBMessageRequestExtraPower) - passing request up to controller", this);
-			return _controller->message(type, provider, argument);
-		}
-		else
-		{
-			USBLog(1, "IOUSBRootHubDevice[%p]::message(kIOUSBMessageRequestExtraPower) - no _controller", this);
-			return kIOReturnNoResources;
-		}
-	}
-	return super::message(type, provider, argument);
-}
-
-
-
-IOReturn
 IOUSBRootHubDevice::GatedDeviceRequest (OSObject *owner,  void *arg0,  void *arg1,  void *arg2,  void *arg3 )
 {
 	IOUSBRootHubDevice *me = (IOUSBRootHubDevice*)owner;
@@ -168,13 +163,17 @@ IOUSBRootHubDevice::DeviceRequest(IOUSBDevRequest *request, IOUSBCompletion *com
 
 
 
-OSMetaClassDefineReservedUsed(IOUSBRootHubDevice,  0);
 IOReturn 
 IOUSBRootHubDevice::DeviceRequest(IOUSBDevRequest *request, UInt32 noDataTimeout, UInt32 completionTimeout, IOUSBCompletion *completion)
 {
 	if (!_commandGate)
 		return kIOReturnNotResponding;
 		
+	if (_myPolicyMaker && (_myPolicyMaker->getPowerState() == kIOUSBHubPowerStateLowPower))
+	{
+		// this is not usually an issue, but i want to make sure it doesn't become one
+		USBLog(5, "IOUSBRootHubDevice[%p]::DeviceRequest - doing a device request while in low power mode - should be OK", this);
+	}
 	return _commandGate->runAction(GatedDeviceRequest, request, (void*)noDataTimeout, (void*)completionTimeout, completion);
 }
 
@@ -379,6 +378,44 @@ IOUSBRootHubDevice::DeviceRequestWorker(IOUSBDevRequest *request, UInt32 noDataT
 }
 
 
+bool
+IOUSBRootHubDevice::IsRootHub(void)
+{
+	return true;
+}
+
+UInt32
+IOUSBRootHubDevice::RequestExtraPower(UInt32 requestedPower)
+{
+	IOUSBControllerV3	*v3Bus = OSDynamicCast(IOUSBControllerV3, GetBus());
+	UInt32				ret = 0;
+	
+	if (v3Bus)
+	{
+		ret = v3Bus->AllocateExtraRootHubPortPower(requestedPower);
+	}
+	USBLog(2, "IOUSBRootHubDevice[%p]::RequestExtraPower - requested (%d) returning (%d)", this, (int)requestedPower, (int)ret);
+	return ret;
+}
+
+
+
+void
+IOUSBRootHubDevice::ReturnExtraPower(UInt32 returnedPower)
+{
+	IOUSBControllerV3	*v3Bus = OSDynamicCast(IOUSBControllerV3, GetBus());
+	if (v3Bus)
+	{
+		USBLog(2, "IOUSBRootHubDevice[%p]::ReturnExtraPower - returning (%d) to controller", this, (int)returnedPower);
+		v3Bus->ReturnExtraRootHubPortPower(returnedPower);
+	}
+	
+	return;
+}
+
+
+
+OSMetaClassDefineReservedUnused(IOUSBRootHubDevice,  0);
 OSMetaClassDefineReservedUnused(IOUSBRootHubDevice,  1);
 OSMetaClassDefineReservedUnused(IOUSBRootHubDevice,  2);
 OSMetaClassDefineReservedUnused(IOUSBRootHubDevice,  3);

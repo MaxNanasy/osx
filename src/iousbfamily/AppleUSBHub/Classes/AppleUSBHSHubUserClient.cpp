@@ -2,7 +2,7 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  *
- * Copyright (c) 1998-2003 Apple Computer, Inc.  All Rights Reserved.
+ * Copyright (c) 1998-2007 Apple Inc.  All Rights Reserved.
  *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -298,7 +298,7 @@ AppleUSBHSHubUserClient::EnterTestMode(void)
         return kIOReturnNotAttached;
 
     if (!fOwner->isOpen(this))
-		return kIOReturnBadArgument;
+	return kIOReturnBadArgument;
 	
     return fOwner->EnterTestMode();
 }
@@ -353,7 +353,7 @@ AppleUSBHSHubUserClient::SupportsIndicators(UInt32 *indicatorSupport)
 	}
 	
     USBLog(1, "+AppleUSBHSHubUserClient::AppleUSB returning %ld", *indicatorSupport);
-   
+	
 	return kIOReturnSuccess;
 }
 
@@ -372,7 +372,7 @@ AppleUSBHSHubUserClient::SetIndicatorForPort(UInt32 portNumber, UInt32 selector)
 		USBLog(1, "AppleUSBHSHubUserClient::SetIndicatorForPort - fOwner (%p) is not open", fOwner);
 		return kIOReturnBadArgument;
     }
-
+	
     return fOwner->SetIndicatorForPort(portNumber, selector);
 }
 
@@ -485,3 +485,4 @@ AppleUSBHSHubUserClient::SetPortPower(UInt32 portNumber, UInt32 on)
 	return fOwner->SetPortPower(portNumber, on);
 	
 }
+

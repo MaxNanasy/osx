@@ -258,7 +258,7 @@ void show(io_registry_entry_t service, UInt32 serviceDepth, UInt64 stackOfBits, 
 		address = NULL;
     }
 	
-    status = IORegistryEntryGetNameInPlane(service, plane, name);
+	status = IORegistryEntryGetNameInPlane(service, plane, name);
     
     sprintf((char *)tempbuf, (char *)name);
     strcat(buf,tempbuf);
@@ -269,7 +269,7 @@ void show(io_registry_entry_t service, UInt32 serviceDepth, UInt64 stackOfBits, 
         strcat(buf,tempbuf); 
     }
     
-    
+	
     status = IOObjectGetClass(service, class);
     
     sprintf((char *)tempbuf, "  <class %s>", class);
