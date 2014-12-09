@@ -16,8 +16,8 @@
  * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-                                        * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-                                        * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
@@ -34,6 +34,7 @@
 #include <jni_runtime.h>
 #include <jni_utility.h>
 #include <runtime_object.h>
+#include <runtime_root.h>
 
 using namespace KJS::Bindings;
 using namespace KJS;
@@ -54,362 +55,91 @@ static bool isJavaScriptThread()
     return (RootObject::runLoop() == CFRunLoopGetCurrent());
 }
 
-// Java does NOT always call finalize (and thus KJS_JSObject_JSFinalize) when
-// it collects an objects.  This presents some difficulties.  We must ensure
-// the a JSObject's corresponding JavaScript object doesn't get collected.  We
-// do this by incrementing the JavaScript's reference count the first time we
-// create a JSObject for it, and decrementing the JavaScript reference count when
-// the last JSObject that refers to it is finalized, or when the applet is
-// shutdown.
-//
-// To do this we keep a dictionary that maps each applet instance
-// to the JavaScript objects it is referencing.  For each JavaScript instance
-// we also maintain a secondary reference count.  When that reference count reaches
-// 1 OR the applet is shutdown we deref the JavaScript instance.  Applet instances
-// are represented by a jlong.
-
-static CFMutableDictionaryRef referencesByRootDictionary = 0;
-
-static CFMutableDictionaryRef getReferencesByRootDictionary()
-{
-    if (!referencesByRootDictionary)
-        referencesByRootDictionary = CFDictionaryCreateMutable(NULL, 0, NULL, &kCFTypeDictionaryValueCallBacks);
-    return referencesByRootDictionary;
-}
-
-static CFMutableDictionaryRef getReferencesDictionary(const Bindings::RootObject *root)
-{
-    CFMutableDictionaryRef refsByRoot = getReferencesByRootDictionary();
-    CFMutableDictionaryRef referencesDictionary = 0;
-    
-    referencesDictionary = (CFMutableDictionaryRef)CFDictionaryGetValue (refsByRoot, (const void *)root);
-    if (!referencesDictionary) {
-        referencesDictionary = CFDictionaryCreateMutable(NULL, 0, NULL, NULL);
-        CFDictionaryAddValue (refsByRoot, root, referencesDictionary);
-        CFRelease (referencesDictionary);
-    }
-    return referencesDictionary;
-}
-
-// Scan all the dictionary for all the roots to see if any have a 
-// reference to the imp, and if so, return it's reference count
-// dictionary.
-// FIXME:  This is a potential performance bottleneck with many applets.  We could fix be adding a
-// imp to root dictionary.
-static CFMutableDictionaryRef findReferenceDictionary(ObjectImp *imp)
-{
-    CFMutableDictionaryRef refsByRoot = getReferencesByRootDictionary ();
-    CFMutableDictionaryRef foundDictionary = 0;
-    
-    if (refsByRoot) {
-        const void **allValues = 0;
-        CFIndex count, i;
-        
-        count = CFDictionaryGetCount(refsByRoot);
-        allValues = (const void **)malloc (sizeof(void *) * count);
-        CFDictionaryGetKeysAndValues (refsByRoot, NULL, allValues);
-        for(i = 0; i < count; i++) {
-            CFMutableDictionaryRef referencesDictionary = (CFMutableDictionaryRef)allValues[i];
-            if (CFDictionaryGetValue(referencesDictionary, imp) != 0) {
-                foundDictionary = referencesDictionary;
-                break;
-            }
-        }
-        
-        free ((void *)allValues);
-    }
-    return foundDictionary;
-}
-
-// FIXME:  This is a potential performance bottleneck with many applets.  We could fix be adding a
-// imp to root dictionary.
-static const Bindings::RootObject *rootForImp (ObjectImp *imp)
-{
-    CFMutableDictionaryRef refsByRoot = getReferencesByRootDictionary ();
-    const Bindings::RootObject *rootObject = 0;
-    
-    if (refsByRoot) {
-        const void **allValues = 0;
-        const void **allKeys = 0;
-        CFIndex count, i;
-        
-        count = CFDictionaryGetCount(refsByRoot);
-        allKeys = (const void **)malloc (sizeof(void *) * count);
-        allValues = (const void **)malloc (sizeof(void *) * count);
-        CFDictionaryGetKeysAndValues (refsByRoot, allKeys, allValues);
-        for(i = 0; i < count; i++) {
-            CFMutableDictionaryRef referencesDictionary = (CFMutableDictionaryRef)allValues[i];
-            if (CFDictionaryGetValue(referencesDictionary, imp) != 0) {
-                rootObject = (const Bindings::RootObject *)allKeys[0];
-                break;
-            }
-        }
-        
-        free ((void *)allKeys);
-        free ((void *)allValues);
-    }
-    return rootObject;
-}
-
-static void addJavaReference (const Bindings::RootObject *root, ObjectImp *imp)
-{
-    JS_LOG ("root = %p, imp %p\n", root, imp);
-
-    CFMutableDictionaryRef referencesDictionary = getReferencesDictionary (root);
-    
-    unsigned int numReferences = (unsigned int)CFDictionaryGetValue (referencesDictionary, imp);
-    if (numReferences == 0) {
-        imp->ref();
-        CFDictionaryAddValue (referencesDictionary, imp,  (const void *)1);
-    }
-    else {
-        CFDictionaryReplaceValue (referencesDictionary, imp, (const void *)(numReferences+1));
-    }
-}
-
-static void removeJavaReference (ObjectImp *imp)
-{
-    JS_LOG ("imp %p\n", imp);
-    CFMutableDictionaryRef referencesDictionary = findReferenceDictionary (imp);
-    
-    unsigned int numReferences = (unsigned int)CFDictionaryGetValue (referencesDictionary, imp);
-    if (numReferences == 1) {
-        imp->deref();
-        CFDictionaryRemoveValue (referencesDictionary, imp);
-    }
-    else {
-        CFDictionaryReplaceValue (referencesDictionary, imp, (const void *)(numReferences-1));
-    }
-}
-
-// May only be set by dispatchToJavaScriptThread().
-static CFRunLoopSourceRef completionSource;
-
-static void performJavaScriptAccess(void *info);
-static void performJavaScriptAccess(void *i)
-{
-    assert (CFRunLoopGetCurrent() == RootObject::runLoop());
-    
-    // Dispatch JavaScript calls here.
-    CFRunLoopSourceContext sourceContext;
-    CFRunLoopSourceGetContext (completionSource, &sourceContext);
-    JSObjectCallContext *callContext = (JSObjectCallContext *)sourceContext.info;    
-    CFRunLoopRef originatingLoop = callContext->originatingLoop;
-
-    JSObject::invoke (callContext);
-    
-    // Signal the originating thread that we're done.
-    CFRunLoopSourceSignal (completionSource);
-    if (CFRunLoopIsWaiting(originatingLoop)) {
-        CFRunLoopWakeUp(originatingLoop);
-    }
-}
-
-static void completedJavaScriptAccess (void *i);
-static void completedJavaScriptAccess (void *i)
-{
-    assert (CFRunLoopGetCurrent() != RootObject::runLoop());
-
-    JSObjectCallContext *callContext = (JSObjectCallContext *)i;
-    CFRunLoopRef runLoop = (CFRunLoopRef)callContext->originatingLoop;
-
-    assert (CFRunLoopGetCurrent() == runLoop);
-
-    CFRunLoopStop(runLoop);
-}
-
-static pthread_once_t javaScriptAccessLockOnce = PTHREAD_ONCE_INIT;
-static pthread_mutex_t javaScriptAccessLock;
-static int javaScriptAccessLockCount = 0;
-
-static void initializeJavaScriptAccessLock()
-{
-    pthread_mutexattr_t attr;
-    
-    pthread_mutexattr_init(&attr);
-    pthread_mutexattr_settype (&attr, PTHREAD_MUTEX_RECURSIVE);
-    
-    pthread_mutex_init(&javaScriptAccessLock, &attr);
-}
-
-static inline void lockJavaScriptAccess()
-{
-    // Perhaps add deadlock detection?
-    pthread_once(&javaScriptAccessLockOnce, initializeJavaScriptAccessLock);
-    pthread_mutex_lock(&javaScriptAccessLock);
-    javaScriptAccessLockCount++;
-}
-
-static inline void unlockJavaScriptAccess()
-{
-    javaScriptAccessLockCount--;
-    pthread_mutex_unlock(&javaScriptAccessLock);
-}
-
-
-static void dispatchToJavaScriptThread(JSObjectCallContext *context)
-{
-    // This lock guarantees that only one thread can invoke
-    // at a time, and also guarantees that completionSource;
-    // won't get clobbered.
-    lockJavaScriptAccess();
-
-    CFRunLoopRef currentRunLoop = CFRunLoopGetCurrent();
-
-    assert (currentRunLoop != RootObject::runLoop());
-
-    // Setup a source to signal once the invocation of the JavaScript
-    // call completes.
-    //
-    // FIXME:  This could be a potential performance issue.  Creating and
-    // adding run loop sources is expensive.  We could create one source 
-    // per thread, as needed, instead.
-    context->originatingLoop = currentRunLoop;
-    CFRunLoopSourceContext sourceContext = {0, context, NULL, NULL, NULL, NULL, NULL, NULL, NULL, completedJavaScriptAccess};
-    completionSource = CFRunLoopSourceCreate(NULL, 0, &sourceContext);
-    CFRunLoopAddSource(currentRunLoop, completionSource, kCFRunLoopDefaultMode);
-
-    // Wakeup JavaScript access thread and make it do it's work.
-    CFRunLoopSourceSignal(RootObject::performJavaScriptSource());
-    if (CFRunLoopIsWaiting(RootObject::runLoop())) {
-        CFRunLoopWakeUp(RootObject::runLoop());
-    }
-    
-    // Wait until the JavaScript access thread is done.
-    CFRunLoopRun ();
-
-    CFRunLoopRemoveSource(currentRunLoop, completionSource, kCFRunLoopDefaultMode);
-    CFRelease (completionSource);
-
-    unlockJavaScriptAccess();
-}
-
-FindRootObjectForNativeHandleFunctionPtr RootObject::_findRootObjectForNativeHandleFunctionPtr = 0;
-CFRunLoopRef RootObject::_runLoop = 0;
-CFRunLoopSourceRef RootObject::_performJavaScriptSource = 0;
-
-// Must be called from the thread that will be used to access JavaScript.
-void RootObject::setFindRootObjectForNativeHandleFunction(FindRootObjectForNativeHandleFunctionPtr aFunc) {
-    // Should only be called once.
-    assert (_findRootObjectForNativeHandleFunctionPtr == 0);
-
-    _findRootObjectForNativeHandleFunctionPtr = aFunc;
-    
-    // Assume that we can retain this run loop forever.  It'll most 
-    // likely (always?) be the main loop.
-    _runLoop = (CFRunLoopRef)CFRetain (CFRunLoopGetCurrent ());
-
-    // Setup a source the other threads can use to signal the _runLoop
-    // thread that a JavaScript call needs to be invoked.
-    CFRunLoopSourceContext sourceContext = {0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, performJavaScriptAccess};
-    _performJavaScriptSource = CFRunLoopSourceCreate(NULL, 0, &sourceContext);
-    CFRunLoopAddSource(_runLoop, _performJavaScriptSource, kCFRunLoopDefaultMode);
-}
-
-// Must be called when the applet is shutdown.
-void RootObject::removeAllJavaReferencesForRoot (Bindings::RootObject *root)
-{
-    JS_LOG ("_root == %p\n", root);
-    CFMutableDictionaryRef referencesDictionary = getReferencesDictionary (root);
-    
-    if (referencesDictionary) {
-        void **allImps = 0;
-        CFIndex count, i;
-        
-        count = CFDictionaryGetCount(referencesDictionary);
-        allImps = (void **)malloc (sizeof(void *) * count);
-        CFDictionaryGetKeysAndValues (referencesDictionary, (const void **)allImps, NULL);
-        for(i = 0; i < count; i++) {
-            ObjectImp *anImp = static_cast<ObjectImp*>(allImps[i]);
-            anImp->deref();
-        }
-        free ((void *)allImps);
-        CFDictionaryRemoveAllValues (referencesDictionary);
-
-        CFMutableDictionaryRef refsByRoot = getReferencesByRootDictionary();
-        CFDictionaryRemoveValue (refsByRoot, (const void *)root);
-        delete root;
-    }
-}
-
 jvalue JSObject::invoke (JSObjectCallContext *context)
 {
     jvalue result;
 
+    bzero ((void *)&result, sizeof(jvalue));
+    
     if (!isJavaScriptThread()) {        
         // Send the call context to the thread that is allowed to
         // call JavaScript.
-        dispatchToJavaScriptThread(context);
+        RootObject::dispatchToJavaScriptThread(context);
         result = context->result;
     }
     else {
         jlong nativeHandle = context->nativeHandle;
         if (nativeHandle == UndefinedHandle || nativeHandle == 0) {
-            bzero ((void *)&result, sizeof(jvalue));
             return result;
         }
 
-        switch (context->type){
-            case CreateNative: {
-                result.j = JSObject::createNative(nativeHandle);
-                break;
-            }
-        
-            case Call: {
-                result.l = JSObject(nativeHandle).call(context->string, context->args);
-                break;
-            }
-            
-            case Eval: {
-                result.l = JSObject(nativeHandle).eval(context->string);
-                break;
-            }
-        
-            case GetMember: {
-                result.l = JSObject(nativeHandle).getMember(context->string);
-                break;
-            }
-            
-            case SetMember: {
-                JSObject(nativeHandle).setMember(context->string, context->value);
-                break;
-            }
-            
-            case RemoveMember: {
-                JSObject(nativeHandle).removeMember(context->string);
-                break;
-            }
-        
-            case GetSlot: {
-                result.l = JSObject(nativeHandle).getSlot(context->index);
-                break;
-            }
-            
-            case SetSlot: {
-                JSObject(nativeHandle).setSlot(context->index, context->value);
-                break;
-            }
-        
-            case ToString: {
-                result.l = (jobject) JSObject(nativeHandle).toString();
-                break;
+        if (context->type == CreateNative) {
+            result.j = JSObject::createNative(nativeHandle);
+        }
+        else {
+            KJS::ObjectImp *imp = jlong_to_impptr(nativeHandle);
+            if (!rootForImp(imp)) {
+                fprintf (stderr, "%s:%d:  Attempt to access JavaScript from destroyed applet, type %d.\n", __FILE__, __LINE__, context->type);
+                return result;
             }
 
-            case Finalize: {
-                ObjectImp *imp = jlong_to_impptr(nativeHandle);
-                if (findReferenceDictionary(imp) == 0) {
-                    // We may have received a finalize method call from the VM 
-                    // AFTER removing our last reference to the Java instance.
-                    JS_LOG ("finalize called on instance we have already removed.\n");
+            switch (context->type){            
+                case Call: {
+                    result.l = JSObject(nativeHandle).call(context->string, context->args);
+                    break;
                 }
-                else {
-                    JSObject(nativeHandle).finalize();
+                
+                case Eval: {
+                    result.l = JSObject(nativeHandle).eval(context->string);
+                    break;
                 }
-                break;
-            }
             
-            default: {
-                fprintf (stderr, "%s:  invalid JavaScript call\n", __PRETTY_FUNCTION__);
+                case GetMember: {
+                    result.l = JSObject(nativeHandle).getMember(context->string);
+                    break;
+                }
+                
+                case SetMember: {
+                    JSObject(nativeHandle).setMember(context->string, context->value);
+                    break;
+                }
+                
+                case RemoveMember: {
+                    JSObject(nativeHandle).removeMember(context->string);
+                    break;
+                }
+            
+                case GetSlot: {
+                    result.l = JSObject(nativeHandle).getSlot(context->index);
+                    break;
+                }
+                
+                case SetSlot: {
+                    JSObject(nativeHandle).setSlot(context->index, context->value);
+                    break;
+                }
+            
+                case ToString: {
+                    result.l = (jobject) JSObject(nativeHandle).toString();
+                    break;
+                }
+    
+                case Finalize: {
+                    ObjectImp *imp = jlong_to_impptr(nativeHandle);
+                    if (findReferenceDictionary(imp) == 0) {
+                        // We may have received a finalize method call from the VM 
+                        // AFTER removing our last reference to the Java instance.
+                        JS_LOG ("finalize called on instance we have already removed.\n");
+                    }
+                    else {
+                        JSObject(nativeHandle).finalize();
+                    }
+                    break;
+                }
+                
+                default: {
+                    fprintf (stderr, "%s:  invalid JavaScript call\n", __PRETTY_FUNCTION__);
+                }
             }
         }
         context->result = result;
@@ -429,7 +159,7 @@ JSObject::JSObject(jlong nativeJSObject)
     
     _root = rootForImp(_imp);
     
-    // If we can't find the root for the object something is terrible wrong.
+    // If we can't find the root for the object something is terribly wrong.
     assert (_root != 0);
 }
 
@@ -467,9 +197,24 @@ jobject JSObject::eval(jstring script) const
     JS_LOG ("script = %s\n", JavaString(script).UTF8String());
 
     Object thisObj = Object(const_cast<ObjectImp*>(_imp));
+    Value result;
+    
     Interpreter::lock();
-    KJS::Value result = _root->interpreter()->evaluate(JavaString(script).ustring(),thisObj).value();
+
+    Completion completion = _root->interpreter()->evaluate(UString(), 0, JavaString(script).ustring(),thisObj);
+    ComplType type = completion.complType();
+    
+    if (type == Normal) {
+        result = completion.value();
+        if (result.isNull()) {
+            result = Undefined();
+        }
+    }
+    else
+        result = Undefined();
+
     Interpreter::unlock();
+    
     return convertValueToJObject (result);
 }
 
@@ -535,17 +280,22 @@ jstring JSObject::toString() const
 {
     JS_LOG ("\n");
 
+    Interpreter::lock();
     Object thisObj = Object(const_cast<ObjectImp*>(_imp));
     ExecState *exec = _root->interpreter()->globalExec();
     
-    return (jstring)convertValueToJValue (exec, thisObj, object_type, "java.lang.String").l;
+    jstring result = (jstring)convertValueToJValue (exec, thisObj, object_type, "java.lang.String").l;
+
+    Interpreter::unlock();
+    
+    return result;
 }
 
 void JSObject::finalize() const
 {
     JS_LOG ("\n");
 
-    removeJavaReference (_imp);
+    removeNativeReference (_imp);
 }
 
 // We're either creating a 'Root' object (via a call to JSObject.getWindow()), or
@@ -559,7 +309,7 @@ jlong JSObject::createNative(jlong nativeHandle)
     else if (rootForImp(jlong_to_impptr(nativeHandle))){
         return nativeHandle;
     }
-        
+
     FindRootObjectForNativeHandleFunctionPtr aFunc = RootObject::findRootObjectForNativeHandleFunction();
     if (aFunc) {
         Bindings::RootObject *root = aFunc(jlong_to_ptr(nativeHandle));
@@ -567,7 +317,7 @@ jlong JSObject::createNative(jlong nativeHandle)
         // otherwise we are being called after creating a JSObject in
         // JSObject::convertValueToJObject().
         if (root) {
-            addJavaReference (root, root->rootObjectImp());        
+            addNativeReference (root, root->rootObjectImp());        
             return ptr_to_jlong(root->rootObjectImp());
         }
         else {
@@ -633,7 +383,7 @@ jobject JSObject::convertValueToJObject (KJS::Value value) const
                 
                 // Bump our 'meta' reference count for the imp.  We maintain the reference
                 // until either finalize is called or the applet shuts down.
-                addJavaReference (_root, imp);
+                addNativeReference (_root, imp);
             }
         }
         // All other types will result in an undefined object.
@@ -641,8 +391,17 @@ jobject JSObject::convertValueToJObject (KJS::Value value) const
             nativeHandle = UndefinedHandle;
         }
         
-        // Now create the Java JSObject.
-        jclass JSObjectClass = env->FindClass ("apple/applet/JSObject");
+        // Now create the Java JSObject.  Look for the JSObject in it's new (Tiger)
+        // location and in the original Java 1.4.2 location.
+        jclass JSObjectClass;
+        
+        JSObjectClass = env->FindClass ("sun/plugin/javascript/webkit/JSObject");
+        if (!JSObjectClass) {
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+            JSObjectClass = env->FindClass ("apple/applet/JSObject");
+        }
+            
         jmethodID constructorID = env->GetMethodID (JSObjectClass, "<init>", "(J)V");
         if (constructorID != NULL) {
             result = env->NewObject (JSObjectClass, constructorID, nativeHandle);
@@ -661,9 +420,7 @@ KJS::Value JSObject::convertJObjectToValue (jobject theObject) const
     // figure 22-4.
     jobject classOfInstance = callJNIObjectMethod(theObject, "getClass", "()Ljava/lang/Class;");
     jstring className = (jstring)callJNIObjectMethod(classOfInstance, "getName", "()Ljava/lang/String;");
-    
-    JS_LOG ("converting instance of class %s\n", Bindings::JavaString(className).UTF8String());
-    
+        
     if (strcmp(Bindings::JavaString(className).UTF8String(), "netscape.javascript.JSObject") == 0) {
         // Pull the nativeJSObject value from the Java instance.  This is a
         // pointer to the ObjectImp.
@@ -681,7 +438,7 @@ KJS::Value JSObject::convertJObjectToValue (jobject theObject) const
     }
 
     Interpreter::lock();
-    KJS::RuntimeObjectImp *newImp = new KJS::RuntimeObjectImp(new Bindings::JavaInstance (theObject));
+    KJS::RuntimeObjectImp *newImp = new KJS::RuntimeObjectImp(new Bindings::JavaInstance (theObject, _root));
     Interpreter::unlock();
 
     return KJS::Object(newImp);
@@ -695,8 +452,14 @@ KJS::List JSObject::listFromJArray(jobjectArray jArray) const
     
     for (i = 0; i < numObjects; i++) {
         jobject anObject = env->GetObjectArrayElement ((jobjectArray)jArray, i);
-        aList.append (convertJObjectToValue(anObject));
-        env->DeleteLocalRef (anObject);
+	if (anObject) {
+	    aList.append (convertJObjectToValue(anObject));
+	    env->DeleteLocalRef (anObject);
+	}
+	else {
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+	}
     }
     return aList;
 }
