@@ -28,6 +28,19 @@
     Change History (most recent first):
 
 $Log: dnssd_clientstub.c,v $
+Revision 1.20.70.3  2006/05/02 16:17:04  majka
+Make NumTries unsigned.
+
+Revision 1.20.70.2  2006/05/01 21:43:09  majka
+Additional change (make NumTries static) for 4527193
+SUChardLondon Libinfo-222.4.6
+
+Revision 1.20.70.1  2006/05/01 16:10:54  majka
+Libinfo-222_4_5 is equivalent to Chardonnay Libinfo-222.0.5
+
+Revision 1.20.60.1  2006/04/27 21:33:30  majka
+Integrated 4527193
+
 Revision 1.20  2005/02/03 00:39:05  majka
 Integrated 3942900
 
@@ -298,7 +311,7 @@ static DNSServiceRef connect_to_server(void)
     {
 	dnssd_sockaddr_t saddr;
 	DNSServiceRef sdr;
-	int NumTries = 0;
+	static unsigned int NumTries = 0;
 
 #if defined(_WIN32)
 	if (!g_initWinsock)
@@ -335,7 +348,7 @@ static DNSServiceRef connect_to_server(void)
 		// daemon is still coming up. Rather than fail here, we'll wait a bit and try again.
 		// If, after ten seconds, we still can't connect to the daemon,
 		// then we give up and return a failure code.
-		if (++NumTries < 10)
+		if (++NumTries < 3)
 			sleep(1);		// Sleep a bit, then try again
 		else
 			{
