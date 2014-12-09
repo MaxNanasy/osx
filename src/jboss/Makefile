@@ -1,16 +1,18 @@
-TOMCAT=jakarta-tomcat-LE-jdk14
+TOMCAT=apache-tomcat-4.1.36
 TARGETDIR:=$(DSTROOT)/Library/JBoss/3.2
 LOGDIR:=$(DSTROOT)/Library/Logs/JBoss
 JBOSS_ROOT:=$(SYMROOT)/jboss-all
-JAVA_HOME:=/System/Library/Frameworks/JavaVM.framework/Versions/1.4.1/Home
+JAVA_HOME:=/Library/Java/Home
 
 install:
 	ditto $(SRCROOT) $(SYMROOT)
 	cd $(JBOSS_ROOT); /bin/sh ./build/build.sh
 	mkdir -p $(LOGDIR)
 	mkdir -p $(TARGETDIR)/deploy $(TARGETDIR)/services
-	ditto $(JBOSS_ROOT)/build/output/jboss-3.2.2RC2  $(TARGETDIR)
-	#snip
+	ditto $(JBOSS_ROOT)/build/output/jboss-3.2.3  $(TARGETDIR)
+	#snip	
+	cp $(TARGETDIR)/docs/examples/jmx/ejb-management.jar $(TARGETDIR)/services
+	cp $(TARGETDIR)/docs/examples/jmx/ejb-management.jar $(TARGETDIR)/server/all/deploy/management
 	#remove obsolete files in all configs
 	rm -rf $(TARGETDIR)/docs $(TARGETDIR)/bin/*.bat $(TARGETDIR)/bin/jboss_init_redhat.sh
 	cd $(TARGETDIR)/server; rm -rf minimal default
@@ -26,9 +28,9 @@ install:
 	cd $(TARGETDIR)/server/all/; ln -s /Library/Logs/JBoss "log"
 	cd $(TARGETDIR)/server; mv all deploy-cluster; ditto deploy-cluster deploy-standalone; ditto deploy-standalone develop
 	# develop config
-	cd $(TARGETDIR)/server/develop/deploy; rm -r cluster-service.xml deploy.last/farm-service.xml cache-invalidation-service.xml jbossha-httpsession.sar jboss-net.sar http-invoker.sar
+	cd $(TARGETDIR)/server/develop/deploy; rm -r cluster-service.xml deploy.last/farm-service.xml cache-invalidation-service.xml jbossha-httpsession.sar jboss-net.sar http-invoker.sar jms/jbossmq-hail.sar
 	# deploy-standalone
-	cd $(TARGETDIR)/server/deploy-standalone/deploy; rm -r cluster-service.xml jmx-console.war deploy.last/farm-service.xml cache-invalidation-service.xml jbossha-httpsession.sar jboss-net.sar http-invoker.sar management/{web-console.war,console-mgr.sar}
+	cd $(TARGETDIR)/server/deploy-standalone/deploy; rm -r cluster-service.xml jmx-console.war deploy.last/farm-service.xml cache-invalidation-service.xml jbossha-httpsession.sar jboss-net.sar http-invoker.sar management/{web-console.war,console-mgr.sar} jms/jbossmq-hail.sar
         #
         # deploy-cluster
 	cd $(TARGETDIR)/server/deploy-cluster/deploy; rm -r http-invoker.sar jmx-console.war jboss-net.sar management/{web-console.war,console-mgr.sar}
@@ -47,7 +49,16 @@ install:
 	rm -rf $(DSTROOT)/Library/Tomcat/logs
 	mkdir $(DSTROOT)/Library/JBoss/3.2/run $(DSTROOT)/Library/JBoss/3.2/farm
 	ln -s "/Library/Logs/JBoss" $(DSTROOT)/Library/Tomcat/logs
-
+        # copying the "Open Source Property List and the license file to the right place."
+	mkdir $(DSTROOT)/usr
+	mkdir $(DSTROOT)/usr/local
+	mkdir $(DSTROOT)/usr/local/OpenSourceVersions
+	cp $(SRCROOT)/JBoss.plist $(DSTROOT)/usr/local/OpenSourceVersions/.
+	mkdir $(DSTROOT)/usr/local/OpenSourceLicenses
+	cp $(SRCROOT)/JBoss.txt $(DSTROOT)/usr/local/OpenSourceLicenses/. 
+	cp $(SRCROOT)/Tomcat.plist $(DSTROOT)/usr/local/OpenSourceVersions/.
+	cp $(SRCROOT)/Tomcat.txt $(DSTROOT)/usr/local/OpenSourceLicenses/. 
+	
 magnum: install
 	cd $(TARGETDIR)/server; ln -s deploy-standalone default
 
@@ -57,7 +68,7 @@ devtools: install
 installhdrs: 
 
 installsrc:
-	gnutar cf - bin deploy lib server tomcat Makefile | (cd $(SRCROOT); gnutar xf -)
+	gnutar cf - bin deploy lib server tomcat Makefile JBoss.txt JBoss.plist Tomcat.plist Tomcat.txt | (cd $(SRCROOT); gnutar xf -)
 	gnutar -xz -C $(SRCROOT) -f jb.tar.gz
 	gnutar -xz -C $(SRCROOT) -f $(TOMCAT).tar.gz
 	cp local.properties $(SRCROOT)/jboss-all/build/etc/local.properties-example
