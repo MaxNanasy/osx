@@ -25,11 +25,13 @@
 #include <libkern/OSByteOrder.h>
 #include <IOKit/IOMemoryCursor.h>
 #include <IOKit/IOMessage.h>
+#include <IOKit/IOKitKeys.h>
 #include <IOKit/IOFilterInterruptEventSource.h>
 
 #include <IOKit/usb/USB.h>
 #include <IOKit/usb/IOUSBLog.h>
 #include <IOKit/pccard/IOPCCard.h>
+#include <IOKit/usb/IOUSBRootHubDevice.h>
 
 #include "AppleUSBEHCI.h"
 #include "AppleEHCIedMemoryBlock.h"
@@ -64,17 +66,17 @@ AppleUSBEHCI::init(OSDictionary * propTable)
 	
     _intLock = IOLockAlloc();
     if (!_intLock)
-        return(false);
+		goto ErrorExit;
 	
     _controllerSpeed = kUSBDeviceSpeedHigh;	// This needs to be set before start.
 											// super uses it during start method
     _wdhLock = IOSimpleLockAlloc();
     if (!_wdhLock)
-        return(false);
+		goto ErrorExit;
 
 	_isochScheduleLock = IOSimpleLockAlloc();
     if (!_isochScheduleLock)
-        return(false);
+		goto ErrorExit;
 
     _uimInitialized = false;
     
@@ -83,7 +85,26 @@ AppleUSBEHCI::init(OSDictionary * propTable)
     _producerCount = 1;
     _consumerCount = 1;
     
-    return (true);
+	// Allocate a thread call to process change detect interrutps
+	_portDetectInterruptThread = thread_call_allocate((thread_call_func_t)PortDetectInterruptThreadEntry, (thread_call_param_t)this);
+	
+	if ( !_portDetectInterruptThread)
+		goto ErrorExit;
+	
+    return true;
+	
+ErrorExit:
+		
+	if (_intLock)
+		IOLockFree(_intLock);
+	
+	if ( _wdhLock )
+		IOSimpleLockFree(_wdhLock);
+	
+	if (_isochScheduleLock)
+		IOSimpleLockFree(_isochScheduleLock);
+	
+	return false;
 }
 
 
@@ -97,6 +118,12 @@ AppleUSBEHCI::free()
     IOSimpleLockFree( _wdhLock );
     IOSimpleLockFree( _isochScheduleLock );
 
+	if (_portDetectInterruptThread)
+    {
+        thread_call_cancel(_portDetectInterruptThread);
+        thread_call_free(_portDetectInterruptThread);
+    }
+	
     super::free();
 }
 
@@ -104,7 +131,7 @@ AppleUSBEHCI::free()
 
 void AppleUSBEHCI::showRegisters(char *s)
 {
-    int i;
+    int i, numPorts;
 	
     USBLog(3,"EHCIUIM -- showRegisters %s version: 0x%x", s, USBToHostWord(_pEHCICapRegisters->HCIVersion));
     USBLog(3,"USBCMD:  %p", (void*)USBToHostLong(_pEHCIRegisters->USBCMD));
@@ -115,7 +142,8 @@ void AppleUSBEHCI::showRegisters(char *s)
     USBLog(3,"PerListBase:  %p", (void*)USBToHostLong(_pEHCIRegisters->PeriodicListBase));
     USBLog(3,"AsyncListAd:  %p", (void*)USBToHostLong(_pEHCIRegisters->AsyncListAddr));
     USBLog(3,"ConfFlg: %p", (void*)USBToHostLong(_pEHCIRegisters->ConfigFlag));
-    for(i=0;i<5;i++)
+    numPorts = USBToHostLong(_pEHCICapRegisters->HCSParams) & kEHCINumPortsMask;
+    for(i=0;i<numPorts;i++)
     {
         UInt32 x;
         x = USBToHostLong(_pEHCIRegisters->PortSC[i]);
@@ -203,7 +231,6 @@ AppleUSBEHCI::UIMInitialize(IOService * provider)
         
         USBLog(7, "AppleUSBEHCI[%p]::UIMInitialize - errata bits=%p",  this,  (void*)_errataBits);
 		
-        _pageSize = PAGE_SIZE;
         _pEHCICapRegisters = (EHCICapRegistersPtr) _deviceBase->getVirtualAddress();
 		
         // enable the card registers
@@ -223,6 +250,8 @@ AppleUSBEHCI::UIMInitialize(IOService * provider)
 			_is64bit = true;
 		else
 			_is64bit = false;
+		
+		setProperty("64bit", _is64bit);
 		
 		ist = (hccparams & kEHCIISTMask) >> kEHCIISTPhase;
 		
@@ -402,26 +431,85 @@ AppleUSBEHCI::AsyncInitialize (void)
 IOReturn 
 AppleUSBEHCI::InterruptInitialize (void)
 {
-    int 			i;
-    UInt32 			termBit, *list; 
-    IOUSBControllerListElement	**logical;
-    IOPhysicalAddress 		physPtr;
+    int								i;
+    UInt32							termBit, *list; 
+    IOUSBControllerListElement		**logical;
+    IOPhysicalAddress				physPtr;
+	IOReturn						status;
+	UInt64							offset = 0;
+	IODMACommand::Segment32			segments;
+	UInt32							numSegments = 1;
+	IODMACommand					*dmaCommand = NULL;
 	
-    _periodicList = (UInt32 *)IOMallocContiguous(kEHCIPeriodicFrameListsize, kEHCIPageSize, &physPtr);
-	
-    if(_periodicList == NULL)
-    {
-		return kIOReturnNoResources;
+    // Set up periodic list
+	_periodicListBuffer = IOBufferMemoryDescriptor::inTaskWithPhysicalMask(kernel_task, kIOMemoryUnshared | kIODirectionInOut, kEHCIPeriodicFrameListsize, kEHCIStructureAllocationPhysicalMask);
+    if (_periodicListBuffer == NULL) 
+	{
+		USBError(1, "AppleUSBEHCI[%p]::InterruptInitialize - IOBufferMemoryDescriptor::inTaskWithPhysicalMask failed", this);
+        return kIOReturnNoMemory;
     }
+    status = _periodicListBuffer->prepare();
+	if (status)
+	{
+		USBError(1, "AppleUSBEHCI[%p]::InterruptInitialize - could not prepare buffer err(%p)", this, (void*)status);
+		_periodicListBuffer->release();
+		_periodicListBuffer = NULL;
+        return status;
+	}
+
+	_periodicList = (UInt32 *)_periodicListBuffer->getBytesNoCopy();
 	
+	// Use IODMACommand to get the physical address
+	dmaCommand = IODMACommand::withSpecification(kIODMACommandOutputHost32, 32, PAGE_SIZE, (IODMACommand::MappingOptions)(IODMACommand::kMapped | IODMACommand::kIterateOnly));
+	if (!dmaCommand)
+	{
+		USBError(1, "AppleUSBEHCI[%p]::InterruptInitialize - could not get IODMACommand", this);
+		_periodicListBuffer->complete();
+		_periodicListBuffer->release();
+		_periodicListBuffer = NULL;
+        return kIOReturnNoMemory;
+	}
+
+	USBLog(6, "AppleUSBEHCI[%p]::InterruptInitialize - got IODMACommand %p", this, dmaCommand);
+	status = dmaCommand->setMemoryDescriptor(_periodicListBuffer);
+	if (status)
+	{
+		USBError(1, "AppleUSBEHCI[%p]::InterruptInitialize - setMemoryDescriptor returned err (%p)", this, (void*)status);
+		dmaCommand->release();
+		_periodicListBuffer->complete();
+		_periodicListBuffer->release();
+		_periodicListBuffer = NULL;
+        return status;
+	}
+	
+	status = dmaCommand->gen32IOVMSegments(&offset, &segments, &numSegments);
+	if (status || (numSegments != 1) || (segments.fLength != PAGE_SIZE))
+	{
+		USBError(1, "AppleUSBEHCI[%p]::InterruptInitialize - could not generate segments err (%p) numSegments (%d) fLength (%d)", this, (void*)status, (int)numSegments, (int)segments.fLength);
+		status = status ? status : kIOReturnInternalError;
+		dmaCommand->clearMemoryDescriptor();
+		dmaCommand->release();
+		_periodicListBuffer->complete();
+		_periodicListBuffer->release();
+		_periodicListBuffer = NULL;
+        return status;
+	}
+	
+	physPtr = segments.fIOVMAddr;
+
+	USBLog(7, "AppleUSBEHCI[%p]::InterruptInitialize - frame list pPhysical[%p] frames[%p]", this, (void*)physPtr, _periodicList);
+
     _pEHCIRegisters->PeriodicListBase = HostToUSBLong(physPtr);
+	dmaCommand->clearMemoryDescriptor();
+	dmaCommand->release();
 	
     _logicalPeriodicList = (IOUSBControllerListElement **)IOMalloc(kEHCIPeriodicFrameListsize);
     if(_logicalPeriodicList == NULL)
     {
-		IOFreeContiguous(_periodicList, kEHCIPeriodicFrameListsize);
-        _periodicList = NULL;
-		return kIOReturnNoResources;
+		_periodicListBuffer->complete();
+		_periodicListBuffer->release();
+		_periodicListBuffer = NULL;
+		return kIOReturnNoMemory;
     }
 	
 	
@@ -535,10 +623,11 @@ AppleUSBEHCI::UIMFinalize(void)
 	
     // Free the memory allocated in the InterruptInitialize()
     //
-    if ( _periodicList )
+    if ( _periodicListBuffer )
 	{
-        IOFreeContiguous( _periodicList, kEHCIPeriodicFrameListsize );
-		_periodicList = NULL;
+		_periodicListBuffer->complete();
+		_periodicListBuffer->release();
+		_periodicListBuffer = NULL;
 	}
 	
     if ( _logicalPeriodicList )
@@ -900,6 +989,11 @@ AppleUSBEHCI::AllocateITD(void)
         if (!_pFreeITD)
             _pLastFreeITD = NULL;
     }
+	
+	// initialize the page pointers to zero length
+	//
+    bzero(&freeITD->GetSharedLogical()->Transaction0, sizeof(EHCIIsochTransferDescriptorShared)-sizeof(IOPhysicalAddress) );
+
     USBLog(7, "AppleUSBEHCI[%p]::AllocateITD - returning %p",  this, freeITD);
     return freeITD;
 }
@@ -1275,7 +1369,7 @@ ErrorExit:
 
 
 IOReturn 
-AppleUSBEHCI::EnableAsyncSchedule(void)
+AppleUSBEHCI::EnableAsyncSchedule(bool waitForON)
 {
     int			i;
     IOReturn	stat = kIOReturnSuccess;
@@ -1283,35 +1377,22 @@ AppleUSBEHCI::EnableAsyncSchedule(void)
     if (!(_pEHCIRegisters->USBCMD & HostToUSBLong(kEHCICMDAsyncEnable)))
     {
 		USBLog(7, "AppleUSBEHCI[%p]::EnableAsyncSchedule: enabling schedule",  this);
-		// first make certain that it really is disabled
-		for (i=0; (i < 100) && (USBToHostLong(_pEHCIRegisters->USBSTS) & kEHCISTSAsyncScheduleStatus); i++)
-			IOSleep(1);
-		if (i)
+		// 4627732 - we used to wait for the bits to get synched up, but there doesn't seem to be
+		// a compelling reason to do so according to the EHCI spec, so we no longer do that
+		if (_errataBits & kErrataAgereEHCIAsyncSched)
 		{
-			if (i >= 100)
-			{
-				USBLog(1, "AppleUSBEHCI[%p]::EnableAsyncSchedule: ERROR: USBCMD and USBSTS won't synchronize OFF",  this);
-				stat = kIOReturnInternalError;
-			}
-			else
-			{
-				USBLog(7, "AppleUSBEHCI[%p]::EnableAsyncSchedule: had to wait %d ms for CMD and STS to synch up OFF",  this, i);
-			}
+			_pEHCIRegisters->USBCMD &= HostToUSBLong(~kEHCICMDRunStop);
+			while (!(USBToHostLong(_pEHCIRegisters->USBSTS) & kEHCIHCHaltedBit))
+				;
+			_pEHCIRegisters->USBCMD |= HostToUSBLong(kEHCICMDAsyncEnable | kEHCICMDRunStop);
+		}
+		else
+		{
+			_pEHCIRegisters->USBCMD |= HostToUSBLong(kEHCICMDAsyncEnable);
 		}
 		
-		if (!stat)
+		if (waitForON)			// 4627732 - only wait if we explicitly say to
 		{
-			if (_errataBits & kErrataAgereEHCIAsyncSched)
-			{
-				_pEHCIRegisters->USBCMD &= HostToUSBLong(~kEHCICMDRunStop);
-				while (!(USBToHostLong(_pEHCIRegisters->USBSTS) & kEHCIHCHaltedBit))
-					;
-				_pEHCIRegisters->USBCMD |= HostToUSBLong(kEHCICMDAsyncEnable | kEHCICMDRunStop);
-			}
-			else
-			{
-				_pEHCIRegisters->USBCMD |= HostToUSBLong(kEHCICMDAsyncEnable);
-			}
 			for (i=0; (i < 100) && !(USBToHostLong(_pEHCIRegisters->USBSTS) & kEHCISTSAsyncScheduleStatus); i++)
 				IOSleep(1);
 			if (i)
@@ -1348,33 +1429,20 @@ AppleUSBEHCI::EnableAsyncSchedule(void)
 
 
 IOReturn 
-AppleUSBEHCI::DisableAsyncSchedule(void)
+AppleUSBEHCI::DisableAsyncSchedule(bool waitForOFF)
 {
     int		i;
     IOReturn	stat = kIOReturnSuccess;
 	
     if (_pEHCIRegisters->USBCMD & HostToUSBLong(kEHCICMDAsyncEnable))
     {
-		// first make certain that it really is enabled
-		for (i=0; (i < 100) && !(USBToHostLong(_pEHCIRegisters->USBSTS) & kEHCISTSAsyncScheduleStatus); i++)
-			IOSleep(1);
-		if (i)
-		{
-			if (i >= 100)
-			{
-				USBLog(1, "AppleUSBEHCI[%p]::DisableAsyncSchedule: ERROR: USBCMD and USBSTS won't synchronize ON",  this);
-				stat = kIOReturnInternalError;
-			}
-			else
-			{
-				USBLog(7, "AppleUSBEHCI[%p]::DisableAsyncSchedule: had to wait %d ms for CMD and STS to synch up ON",  this, i);
-			}
-		}
-		
-		if (!stat)
-		{
-			_pEHCIRegisters->USBCMD &= HostToUSBLong(~kEHCICMDAsyncEnable);
+		USBLog(7, "AppleUSBEHCI[%p]::DisableAsyncSchedule: disabling schedule",  this);
+		// 4627732 - we used to wait for the bits to get synched up, but there doesn't seem to be
+		// a compelling reason to do so according to the EHCI spec, so we no longer do that
+		_pEHCIRegisters->USBCMD &= HostToUSBLong(~kEHCICMDAsyncEnable);
 			
+		if (waitForOFF)					// 4627732 - only wait if we explicitly say to
+		{
 			for (i=0; (i < 100) && (USBToHostLong(_pEHCIRegisters->USBSTS) & kEHCISTSAsyncScheduleStatus); i++)
 				IOSleep(1);
 			if (i)
@@ -1411,9 +1479,9 @@ AppleUSBEHCI::DisableAsyncSchedule(void)
 
 
 IOReturn 
-AppleUSBEHCI::EnablePeriodicSchedule(void)
+AppleUSBEHCI::EnablePeriodicSchedule(bool waitForON)
 {
-    int		i;
+    int			i;
     IOReturn	stat = kIOReturnSuccess;
 	
 	if (_inAbortIsochEP)
@@ -1423,26 +1491,14 @@ AppleUSBEHCI::EnablePeriodicSchedule(void)
 	}
     if (!(_pEHCIRegisters->USBCMD & HostToUSBLong(kEHCICMDPeriodicEnable)))
     {
-		// first make certain that it really is disabled
-		for (i=0; (i < 100) && (USBToHostLong(_pEHCIRegisters->USBSTS) & kEHCISTSPeriodicScheduleStatus); i++)
-			IOSleep(1);
-		if (i)
-		{
-			if (i >= 100)
-			{
-				USBLog(1, "AppleUSBEHCI[%p]::EnablePeriodicSchedule: ERROR: USBCMD and USBSTS won't synchronize OFF",  this);
-				stat = kIOReturnInternalError;
-			}
-			else
-			{
-				USBLog(7, "AppleUSBEHCI[%p]::EnablePeriodicSchedule: had to wait %d ms for CMD and STS to synch up OFF",  this, i);
-			}
-		}
+		USBLog(7, "AppleUSBEHCI[%p]::EnablePeriodicSchedule: enabling schedule",  this);
+		// 4627732 - we used to wait for the bits to get synched up, but there doesn't seem to be
+		// a compelling reason to do so according to the EHCI spec, so we no longer do that
 		
-		if (!stat)
-		{
-			_pEHCIRegisters->USBCMD |= HostToUSBLong(kEHCICMDPeriodicEnable);
+		_pEHCIRegisters->USBCMD |= HostToUSBLong(kEHCICMDPeriodicEnable);
 			
+		if (waitForON)					// 4627732 - only wait if we explicitly say to
+		{
 			for (i=0; (i < 100) && !(USBToHostLong(_pEHCIRegisters->USBSTS) & kEHCISTSPeriodicScheduleStatus); i++)
 				IOSleep(1);
 			if (i)
@@ -1479,34 +1535,20 @@ AppleUSBEHCI::EnablePeriodicSchedule(void)
 
 
 IOReturn 
-AppleUSBEHCI::DisablePeriodicSchedule(void)
+AppleUSBEHCI::DisablePeriodicSchedule(bool waitForOFF)
 {
     int		i;
     IOReturn	stat = kIOReturnSuccess;
 	
     if (_pEHCIRegisters->USBCMD & HostToUSBLong(kEHCICMDPeriodicEnable))
     {
-		// first make certain that it really is enabled
-		for (i=0; (i < 100) && !(USBToHostLong(_pEHCIRegisters->USBSTS) & kEHCISTSPeriodicScheduleStatus); i++)
-			IOSleep(1);
+		USBLog(7, "AppleUSBEHCI[%p]::DisablePeriodicSchedule: disabling schedule",  this);
+		// 4627732 - we used to wait for the bits to get synched up, but there doesn't seem to be
+		// a compelling reason to do so according to the EHCI spec, so we no longer do that
+		_pEHCIRegisters->USBCMD &= HostToUSBLong(~kEHCICMDPeriodicEnable);
 			
-		if (i)
+		if (waitForOFF)					// 4627732 - only wait if we explicitly say to
 		{
-			if (i >= 100)
-			{
-				USBLog(1, "AppleUSBEHCI[%p]::DisablePeriodicSchedule: ERROR: USBCMD and USBSTS won't synchronize ON",  this);
-				stat = kIOReturnInternalError;
-			}
-			else
-			{
-				USBLog(7, "AppleUSBEHCI[%p]::DisablePeriodicSchedule: had to wait %d ms for CMD and STS to synch up ON",  this, i);
-			}
-		}
-		
-		if (!stat)
-		{
-			_pEHCIRegisters->USBCMD &= HostToUSBLong(~kEHCICMDPeriodicEnable);
-			
 			for (i=0; (i < 100) && (USBToHostLong(_pEHCIRegisters->USBSTS) & kEHCISTSPeriodicScheduleStatus); i++)
 				IOSleep(1);
 
@@ -1546,13 +1588,29 @@ AppleUSBEHCI::DisablePeriodicSchedule(void)
 IOReturn
 AppleUSBEHCI::message( UInt32 type, IOService * provider,  void * argument )
 {
-    cs_event_t	pccardevent;
 	
-    // Let our superclass decide handle this method
-    // messages
-    //
+    USBLog(6, "AppleUSBEHCI[%p]::message type: %p, isInactive = %d",  this, (void*)type, isInactive());
+
+	if (type == kIOUSBMessageExpressCardCantWake)
+	{
+		IOService *					nub = (IOService*)argument;
+		const IORegistryPlane *		usbPlane = getPlane(kIOUSBPlane);
+		IOUSBRootHubDevice *		parentHub = OSDynamicCast(IOUSBRootHubDevice, nub->getParentEntry(usbPlane));
+
+		nub->retain();
+		USBLog(1, "AppleUSBUHCI[%p]::message - got kIOUSBMessageExpressCardCantWake from driver %s[%p] argument is %s[%p]", this, provider->getName(), provider, nub->getName(), nub);
+		if (parentHub == _rootHubDevice)
+		{
+			USBLog(1, "AppleUSBUHCI[%p]::message - device is attached to my root hub!!", this);
+			_badExpressCardAttached = true;
+		}
+		nub->release();
+		return kIOReturnSuccess;  // this message was handled
+	}
+
     if ( type == kIOPCCardCSEventMessage)
     {
+		cs_event_t	pccardevent;
         pccardevent = (UInt32) argument;
 		
         if ( pccardevent == CS_EVENT_CARD_REMOVAL )
@@ -1562,9 +1620,13 @@ AppleUSBEHCI::message( UInt32 type, IOService * provider,  void * argument )
             USBLog(5,"AppleUSBEHCI[%p]: Received kIOPCCardCSEventMessage Need to return all transactions",this);
             _pcCardEjected = true;
         }
+		// let the super-class run as well...
     }
 	
-    USBLog(6, "AppleUSBEHCI[%p]::message type: %p, isInactive = %d",  this, (void*)type, isInactive());
+
+    // Let our superclass decide handle this method
+    // messages
+    //
     return super::message( type, provider, argument );
 	
 }
@@ -1593,6 +1655,15 @@ void
 AppleUSBEHCI::ReturnIsochDoneQueue(IOUSBControllerIsochEndpoint* isochEP)
 {
 	super::ReturnIsochDoneQueue(isochEP);
+}
+
+
+
+IODMACommand*
+AppleUSBEHCI::GetNewDMACommand()
+{
+	USBLog(7, "AppleUSBEHCI[%p]::GetNewDMACommand - creating %d bit IODMACommand", this, _is64bit ? 64 : 32);
+	return IODMACommand::withSpecification(kIODMACommandOutputHost64, _is64bit ? 64 : 32, 0);
 }
 
 

@@ -207,6 +207,7 @@ IOUSBCompositeDriver::ConfigureDevice()
     SInt16                                  maxPower = -1;
     UInt8                                   numberOfConfigs = 0;
 	OSBoolean *								suspendPropertyRef;
+	OSBoolean *								expressCardCantWakeRef;
     
    // Find if we have a Preferred Configuration
     //
@@ -335,6 +336,15 @@ IOUSBCompositeDriver::ConfigureDevice()
         }
     }
     
+	// See if this is an express card device which would disconnect on sleep (thus waking everytime)
+	//
+	expressCardCantWakeRef = OSDynamicCast( OSBoolean, fDevice->getProperty(kUSBExpressCardCantWake) );
+	if ( expressCardCantWakeRef && expressCardCantWakeRef->isTrue() )
+	{
+		USBLog(3, "%s[%p](%s) found an express card device which will disconnect across sleep", getName(), this, fDevice->getName() );
+		fDevice->GetBus()->message(kIOUSBMessageExpressCardCantWake, this, fDevice);
+	}
+	
 	// If we have a property that tells us that we should suspend the port, do it now
 	//
 	suspendPropertyRef = OSDynamicCast( OSBoolean, fDevice->getProperty(kUSBSuspendPort) );
@@ -380,6 +390,7 @@ IOUSBCompositeDriver::ReConfigureDevice()
     UInt8                                   numberOfConfigs = 0;
     UInt32                                  i;
 	OSBoolean *								suspendPropertyRef;
+	OSBoolean *								expressCardCantWakeRef;
     
     // Clear out the structure for the request
     //
@@ -436,6 +447,15 @@ IOUSBCompositeDriver::ReConfigureDevice()
         }
     }
     
+	// See if this is an express card device which would disconnect on sleep (thus waking everytime)
+	//
+	expressCardCantWakeRef = OSDynamicCast( OSBoolean, fDevice->getProperty(kUSBExpressCardCantWake) );
+	if ( expressCardCantWakeRef && expressCardCantWakeRef->isTrue() )
+	{
+		USBLog(3, "%s[%p](%s) found an express card device which will disconnect across sleep", getName(), this, fDevice->getName() );
+		fDevice->GetBus()->message(kIOUSBMessageExpressCardCantWake, this, fDevice);
+	}
+	
 	// If we have a property that tells us that we should suspend the port, do it now
 	//
 	suspendPropertyRef = OSDynamicCast( OSBoolean, fDevice->getProperty(kUSBSuspendPort) );
@@ -448,7 +468,8 @@ IOUSBCompositeDriver::ReConfigureDevice()
 			USBLog(3, "%s[%p](%s) SuspendDevice returned 0x%x", getName(), this, fDevice->getName(), err );
 		}
 	}
-    
+    fDevice->close(this);
+	
 ErrorExit:
         
     USBLog(3, "%s[%p]::ReConfigureDevice returned 0x%x",getName(),this, err);
