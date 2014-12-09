@@ -20,7 +20,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*
- * Copyright (c) 1998 Apple Computer, Inc.  All rights reserved.
+ * Copyright (c) 1998-2005 Apple Computer, Inc.  All rights reserved.
  *
  * Implementation of the interface for the keylargo I2C interface
  *
@@ -36,12 +36,25 @@ extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
 #define super IOService
 OSDefineMetaClassAndStructors( PPCI2CInterface, IOService )
 
+static IOService * pmu;
+
+static const OSSymbol *i2cCommandSym;
+static const OSSymbol *i2cOpenSym;
+static const OSSymbol *i2cCloseSym;
 
 // Uncomment the following define if you wish ro see more logging
 // on the i2c interface. Note: use this only in polling mode since
 // IOLog panics when used in primary interrupt context.
 // #define DEBUGMODE 
 // #define DEBUGPMU  // for just PMU i2c related debug logs
+
+// Add macros so that there aren't #ifdef DEBUGMODE / #endif combos around
+// any given IOLog()
+#ifdef DEBUGMODE
+#define DEBUGLOG(fmt, args...)  IOLog(fmt, ## args)
+#else
+#define DEBUGLOG(fmt, args...)
+#endif
 
 // Delay after accessing to an I2C register
 #define I2C_REGISTERDELAY 10
@@ -51,10 +64,36 @@ OSDefineMetaClassAndStructors( PPCI2CInterface, IOService )
 
 // FIXME: change the if 0 into if 1 in the following line for final
 // builds so all the simple private functions can be inlined.
-#if 1
+#if TRUE
 #define INLINE inline
 #else
 #define INLINE
+#endif
+
+#if defined( __ppc__ )
+static UInt64 SpinLoop (UInt32 spinCount) {
+	AbsoluteTime start, end;
+	SInt64 startnano, delta;
+	volatile UInt32 volCount = spinCount;			// Make compiler run the loop
+	
+	clock_get_uptime (&start);
+	absolutetime_to_nanoseconds (start, (UInt64 *)&startnano);
+	while (volCount--) ;
+
+	clock_get_uptime (&end);
+	absolutetime_to_nanoseconds (end, (UInt64 *)&delta);
+	delta -= startnano;
+	
+	return delta;
+}
+
+static void SpinDelay (UInt32 delay, UInt32 loopsPerMic) {
+	if (ml_at_interrupt_context()) {
+		(void) SpinLoop (delay * loopsPerMic);
+	} else
+		IODelay (delay);
+}
+
 #endif
 
 // --------------------------------------------------------------------------
@@ -65,16 +104,14 @@ OSDefineMetaClassAndStructors( PPCI2CInterface, IOService )
 INLINE void
 PPCI2CInterface::dumpI2CRegisters()
 {
-#ifdef DEBUGMODE
-    IOLog("mode    0x%08lx -> 0x%02x\n", (UInt32)mode,*mode);
-    IOLog("control 0x%08lx -> 0x%02x\n", (UInt32)control,*control);
-    IOLog("status  0x%08lx -> 0x%02x\n", (UInt32)status,*status);
-    IOLog("ISR     0x%08lx -> 0x%02x\n", (UInt32)ISR,*ISR);
-    IOLog("IER     0x%08lx -> 0x%02x\n", (UInt32)IER,*IER);
-    IOLog("address 0x%08lx -> 0x%02x\n", (UInt32)address,*address);
-    IOLog("subAddr 0x%08lx -> 0x%02x\n", (UInt32)subAddr,*subAddr);
-    //IOLog("data    0x%08lx -> 0x%02x\n", (UInt32)data,*data);
-#endif //DEBUGMODE
+    DEBUGLOG("mode    0x%08lx -> 0x%02x\n", (UInt32)mode,*mode);
+    DEBUGLOG("control 0x%08lx -> 0x%02x\n", (UInt32)control,*control);
+    DEBUGLOG("status  0x%08lx -> 0x%02x\n", (UInt32)status,*status);
+    DEBUGLOG("ISR     0x%08lx -> 0x%02x\n", (UInt32)ISR,*ISR);
+    DEBUGLOG("IER     0x%08lx -> 0x%02x\n", (UInt32)IER,*IER);
+    DEBUGLOG("address 0x%08lx -> 0x%02x\n", (UInt32)address,*address);
+    DEBUGLOG("subAddr 0x%08lx -> 0x%02x\n", (UInt32)subAddr,*subAddr);
+    //DEBUGLOG("data    0x%08lx -> 0x%02x\n", (UInt32)data,*data);
 }
 
 // --------------------------------------------------------------------------
@@ -107,7 +144,7 @@ PPCI2CInterface::SetI2CBase(UInt8 *baseAddress, UInt8 steps)
         getMode();
 
 #ifdef DEBUGMODE
-        IOLog("PPCI2CInterface::SetI2CBase(0x%08lx,0x%02x)\n",(UInt32)baseAddress, steps);
+        DEBUGLOG("PPCI2CInterface::SetI2CBase(0x%08lx,0x%02x)\n",(UInt32)baseAddress, steps);
         dumpI2CRegisters();
 #endif // DEBUGMODE
     }
@@ -151,15 +188,13 @@ PPCI2CInterface::writeRegisterField(I2CRegister reg, UInt8 mask, UInt8 shift, UI
 
     *reg = (registerValue & nMask) | (data << shift);
     eieio();
-    IODelay(I2C_REGISTERDELAY);
+    I2CIODelay(I2C_REGISTERDELAY);
     
-#ifdef DEBUGMODE
-    IOLog("PPCI2CInterface::writeRegisterField(0x%08lx, 0x%02x, 0x%02x, 0x%02x)\n",(UInt32)reg, mask, shift, newData);
-    IOLog("PPCI2CInterface::writeRegisterField() registerValue=0x%02x\n", registerValue);
-    IOLog("PPCI2CInterface::writeRegisterField() data=0x%02x\n", data);
-    IOLog("PPCI2CInterface::writeRegisterField() nMask=0x%02x\n", nMask);
-    IOLog("PPCI2CInterface::writeRegisterField() *reg=0x%02x\n", *reg);
-#endif // DEBUGMODE
+    DEBUGLOG("PPCI2CInterface::writeRegisterField(0x%08lx, 0x%02x, 0x%02x, 0x%02x)\n",(UInt32)reg, mask, shift, newData);
+    DEBUGLOG("PPCI2CInterface::writeRegisterField() registerValue=0x%02x\n", registerValue);
+    DEBUGLOG("PPCI2CInterface::writeRegisterField() data=0x%02x\n", data);
+    DEBUGLOG("PPCI2CInterface::writeRegisterField() nMask=0x%02x\n", nMask);
+    DEBUGLOG("PPCI2CInterface::writeRegisterField() *reg=0x%02x\n", *reg);
 }
 
 // --------------------------------------------------------------------------
@@ -175,11 +210,9 @@ PPCI2CInterface::readRegisterField(I2CRegister reg, UInt8 mask, UInt8 shift)
     UInt8 registerValue = *reg;
     UInt8 returnValue = ((registerValue) >> shift) & mask;
 
-#ifdef DEBUGMODE
-    IOLog("PPCI2CInterface::readRegisterField(0x%08lx, 0x%02x, 0x%02x)\n",(UInt32)reg, mask, shift);
-    IOLog("PPCI2CInterface::readRegisterField() *reg=0x%02x\n", *reg);
-    IOLog("PPCI2CInterface::readRegisterField() returnValue=0x%02x\n", returnValue);
-#endif // DEBUGMODE
+    DEBUGLOG("PPCI2CInterface::readRegisterField(0x%08lx, 0x%02x, 0x%02x)\n",(UInt32)reg, mask, shift);
+    DEBUGLOG("PPCI2CInterface::readRegisterField() *reg=0x%02x\n", *reg);
+    DEBUGLOG("PPCI2CInterface::readRegisterField() returnValue=0x%02x\n", returnValue);
 
     return returnValue;
 }
@@ -253,7 +286,7 @@ PPCI2CInterface::setControl(I2CControl newControlValue)
 {
     *control = (UInt8)newControlValue;
     eieio();
-    IODelay(I2C_REGISTERDELAY);
+    I2CIODelay(I2C_REGISTERDELAY);
 }
 
 INLINE PPCI2CInterface::I2CControl
@@ -271,7 +304,7 @@ PPCI2CInterface::setStatus(I2CStatus newStatusValue)
 {
     *status = (UInt8)newStatusValue;
     eieio();
-    IODelay(I2C_REGISTERDELAY);
+    I2CIODelay(I2C_REGISTERDELAY);
 }
 
 INLINE PPCI2CInterface::I2CStatus
@@ -288,7 +321,7 @@ PPCI2CInterface::setInterruptStatus(I2CInterruptStatus newStatusValue)
 {
     *ISR = (UInt8)newStatusValue;
     eieio();
-    IODelay(I2C_REGISTERDELAY);
+    I2CIODelay(I2C_REGISTERDELAY);
 }
 
 INLINE PPCI2CInterface::I2CInterruptStatus
@@ -305,7 +338,7 @@ PPCI2CInterface::setInterruptEnable(I2CInterruptEnable newInterruptEnable)
 {
     *IER = (UInt8)newInterruptEnable;
     eieio();
-    IODelay(I2C_REGISTERDELAY);
+    I2CIODelay(I2C_REGISTERDELAY);
 }
 
 INLINE PPCI2CInterface::I2CInterruptEnable
@@ -329,19 +362,19 @@ PPCI2CInterface::setAddressRegister(UInt8 newAddress, I2CRWMode readMode)
 {
     newAddress &= kADDRMask;
     
-    if (pseudoI2C) {
+    if (pseudoI2C)
+	{
         currentAddress = (newAddress << I2CAddressShift) | readMode;
-        }
-    else {
+	}
+    else
+	{
         *address = (newAddress << I2CAddressShift) | readMode;
-        IODelay(I2C_REGISTERDELAY);
+        I2CIODelay(I2C_REGISTERDELAY);
 
-#ifdef DEBUGMODE
-    IOLog("setAddressRegister( 0x%02x, %d) = 0x%02x\n", newAddress, (UInt8)readMode, (UInt8)*address);
-#endif // DEBUGMODE
+		DEBUGLOG("setAddressRegister( 0x%02x, %d) = 0x%02x\n", newAddress, (UInt8)readMode, (UInt8)*address);
 
         eieio();
-        }
+	}
 }
 
 INLINE UInt8
@@ -383,7 +416,7 @@ PPCI2CInterface::setData(UInt8 newByte)
 {
     *data = newByte;
     eieio();
-    IODelay(I2C_REGISTERDELAY);
+    I2CIODelay(I2C_REGISTERDELAY);
 }
 
 INLINE UInt8
@@ -423,9 +456,7 @@ PPCI2CInterface::setAddressAndDirection()
     currentState = ki2cStateWaitingForIADDR;
     setControl((I2CControl)(getControl() | kXAddrCNTRL));
 
-#ifdef DEBUGMODE
-    IOLog("PPCI2CInterface::setAddressAndDirection()\n");
-#endif // DEBUGMODE
+    DEBUGLOG("PPCI2CInterface::setAddressAndDirection()\n");
 
     return(true);
 }
@@ -440,17 +471,15 @@ PPCI2CInterface::i2cStandardSubModeInterrupts(UInt8 interruptStatus)
 {
     bool success = true;
 
-    switch (currentState) {
+    switch (currentState)
+	{
         case ki2cStateWaitingForIADDR:
-#ifdef DEBUGMODE            
-            IOLog("ki2cStateWaitingForIADDR: ");
-#endif // DEBUGMODE            
+            DEBUGLOG("ki2cStateWaitingForIADDR: ");
 
             // verify that correct interrupt bit set
-            if ((interruptStatus & kIAddrISR) == 0) {
-#ifdef DEBUGMODE            
-                IOLog("PPCI2CInterface::i2cStandardSubModeInterrupts (ki2cStateWaitingForIADDR): bad state ");
-#endif
+            if ((interruptStatus & kIAddrISR) == 0)
+			{
+                DEBUGLOG("PPCI2CInterface::i2cStandardSubModeInterrupts (ki2cStateWaitingForIADDR): bad state ");
                 success = false;
             }
 
@@ -473,9 +502,9 @@ PPCI2CInterface::i2cStandardSubModeInterrupts(UInt8 interruptStatus)
                     else {
                         // no slave responded, so wait for STOP (control bit does not need to be set,
                         // since NAAK sets the control bit automatically)
-#ifdef DEBUGMODE            
-                        IOLog("ki2cStateWaitingForIADDR...no slave...");
-#endif
+
+                        DEBUGLOG("ki2cStateWaitingForIADDR...no slave...");
+
                         currentState = ki2cStateWaitingForISTOP;
                         success = false;
                     }
@@ -490,14 +519,15 @@ PPCI2CInterface::i2cStandardSubModeInterrupts(UInt8 interruptStatus)
             break;
 
         case ki2cStateWaitingForIDATA:
-#ifdef DEBUGMODE            
-            IOLog("ki2cStateWaitingForIDATA: ");
-#endif
+
+            DEBUGLOG("ki2cStateWaitingForIDATA: ");
+
             // verify that correct interrupt bit set
-            if ((interruptStatus & kIDataISR) == 0) {
-#ifdef DEBUGMODE            
-                IOLog("PPCI2CInterface::i2cStandardSubModeInterrupts (ki2cStateWaitingForIDATA): bad state ");
-#endif
+            if ((interruptStatus & kIDataISR) == 0)
+			{
+
+                DEBUGLOG("PPCI2CInterface::i2cStandardSubModeInterrupts (ki2cStateWaitingForIDATA): bad state ");
+
                 success = false;
             }
 
@@ -528,12 +558,13 @@ PPCI2CInterface::i2cStandardSubModeInterrupts(UInt8 interruptStatus)
                                 nBytes--;
                             }
                         }
-                       else {
+                       else
+					   {
                            // no slave responded, so wait for STOP (control bit does not need to be set,
                            // since NAAK sets the control bit automatically)
-#ifdef DEBUGMODE            
-                           IOLog("ki2cStateWaitingForIDATA...no slave...");
-#endif
+
+                           DEBUGLOG("ki2cStateWaitingForIDATA...no slave...");
+
                            currentState = ki2cStateWaitingForISTOP;
                            success = false;
                         }
@@ -549,14 +580,15 @@ PPCI2CInterface::i2cStandardSubModeInterrupts(UInt8 interruptStatus)
             break;
 
         case ki2cStateWaitingForISTOP:
-#ifdef DEBUGMODE
-            IOLog("ki2cStateWaitingForISTOP: ");
-#endif
+
+            DEBUGLOG("ki2cStateWaitingForISTOP: ");
+
             // verify that correct interrupt bit set
-            if ((interruptStatus & kIStopISR) == 0) {
-#ifdef DEBUGMODE
-                IOLog("PPCI2CInterface::i2cStandardSubModeInterrupts (ki2cStateWaitingForISTOP): bad state ");
-#endif
+            if ((interruptStatus & kIStopISR) == 0)
+			{
+
+                DEBUGLOG("PPCI2CInterface::i2cStandardSubModeInterrupts (ki2cStateWaitingForISTOP): bad state ");
+
                 success = false;
             }
 
@@ -566,23 +598,23 @@ PPCI2CInterface::i2cStandardSubModeInterrupts(UInt8 interruptStatus)
            break;
 
         case ki2cStateWaitingForISTART:
-#ifdef DEBUGMODE
-            IOLog("ki2cStateWaitingForISTART: is not supposed to happen in this state machine ");
-#endif
+
+            DEBUGLOG("ki2cStateWaitingForISTART: is not supposed to happen in this state machine ");
+
             break;
 
         case ki2cStateIdle:
-#ifdef DEBUGMODE
-            IOLog("ki2cStateIdle: ");
-#endif
+
+            DEBUGLOG("ki2cStateIdle: ");
+
             break;
 
         default:
              break;
     }
-#ifdef DEBUGMODE
-    IOLog(" %s\n", (success ? "true" : "false"));
-#endif
+
+    DEBUGLOG(" %s\n", (success ? "true" : "false"));
+
 
     // tell the system that this interrupt has been serviced
     return success;
@@ -628,7 +660,7 @@ PPCI2CInterface::waitForCompletion()
     while((loop--) && (currentState != ki2cStateIdle)) {
 		// If at interrupt context, use spin delay instead of sleep
 		if (ml_at_interrupt_context())
-			IODelay (1000);
+			I2CIODelay (1000);
 		else
 			IOSleep(1);
 
@@ -639,16 +671,18 @@ PPCI2CInterface::waitForCompletion()
             handleI2CInterrupt();
     }
     
-    if (currentState != ki2cStateIdle) {
-#ifdef DEBUGMODE
-        IOLog("PPCI2CInterface::waitForCompletion error loop is incomplete\n");
-#endif
+    if (currentState != ki2cStateIdle)
+	{
+
+        DEBUGLOG("PPCI2CInterface::waitForCompletion error loop is incomplete\n");
+
         return false;
     }
-    else {
-#ifdef DEBUGMODE
-        IOLog("PPCI2CInterface::waitForCompletion loop is complete\n");
-#endif
+    else
+	{
+
+        DEBUGLOG("PPCI2CInterface::waitForCompletion loop is complete\n");
+
         return true;        
     }
 }
@@ -674,9 +708,9 @@ PPCI2CInterface::setKhzSpeed(UInt speed)
             break;
 
         default:
-#ifdef DEBUGMODE
-            IOLog("PPCI2CInterface::setKhzSpeed Can not set bus speed %d is not allowed\n", speed);
-#endif
+
+            DEBUGLOG("PPCI2CInterface::setKhzSpeed Can not set bus speed %d is not allowed\n", speed);
+
             return false;
             break;
     }
@@ -717,9 +751,9 @@ PPCI2CInterface::handleI2CInterrupt()
     switch(lastMode)
     {
         case kDumbMode:
-#ifdef DEBUGMODE
-            IOLog("PPCI2CInterface::handleI2CInterrupt kDumbMode is an unsupported mode (for now)\n");
-#endif
+
+            DEBUGLOG("PPCI2CInterface::handleI2CInterrupt kDumbMode is an unsupported mode (for now)\n");
+
             break;
 
         case kStandardMode:
@@ -735,11 +769,11 @@ PPCI2CInterface::handleI2CInterrupt()
     // Update the transfer status:
     transferWasSuccesful = (transferWasSuccesful && success);
 
-#ifdef DEBUGMODE
-    IOLog("PPCI2CInterface::handleI2CInterrupt transferWasSuccesful = %s success= %s.\n",
+
+    DEBUGLOG("PPCI2CInterface::handleI2CInterrupt transferWasSuccesful = %s success= %s.\n",
               ((transferWasSuccesful) ? "true" : "false"),
               (success ? "true" : "false"));
-#endif // DEBUGMODE
+
 
     // By default we fail ...
     return success;
@@ -751,10 +785,11 @@ PPCI2CInterface::handleI2CInterrupt()
 bool
 PPCI2CInterface::start(IOService *provider)
 {
-    OSData *t;
+    OSData *aPropertyPtr;
     UInt32 baseAddress;
     UInt32 addressSteps;
     UInt32 rate;
+	UInt64 loopTime;
     OSIterator *iterator;
     IORegistryEntry *registryEntry;
     IOService *nub;
@@ -763,88 +798,103 @@ PPCI2CInterface::start(IOService *provider)
     i2cRegisterMap = NULL;
 
     if (!super::start(provider)) return false;	//this was just added..
+	
+	i2cCommandSym = OSSymbol::withCString( "sendSMUI2CCommand" );
+	i2cOpenSym    = OSSymbol::withCString( "openSMUI2CCommand" );
+	i2cCloseSym   = OSSymbol::withCString( "closeSMUI2CCommand" );
     
     //see if we are attached to pmu-i2c or smu-i2c node, and if so set pseudoI2C = TRUE.
     retrieveProperty(provider);
 
     // Creates the mutex lock to provide atomic access to the services of the I2C bus:
     mutexLock = IORecursiveLockAlloc();
-    if (mutexLock == NULL) {
-#ifdef DEBUGMODE
-        IOLog("PPCI2CInterface::start  can not create the IORecursiveLock so we bail off\n");
-#endif
+    if (mutexLock == NULL)
+	{
+
+        DEBUGLOG("PPCI2CInterface::start  can not create the IORecursiveLock so we bail off\n");
+
         return false;
     }
     IORecursiveLockLock(mutexLock);  //Keep clients from accessing until start is complete
 
-#ifdef DEBUGMODE
-    IOLog("PPCI2CInterface::start(%s)\n", provider->getName());
-#endif
+    DEBUGLOG("PPCI2CInterface::start(%s)\n", provider->getName());
     
     // sets up the interface:
-#if 1
-
+#if TRUE
     //if PMU-I2C, skip the following... 
-    if (!pseudoI2C) {
+    if ( ! pseudoI2C )
+	{
+		aPropertyPtr = OSDynamicCast(OSData, provider->getProperty("AAPL,address"));
+		if (aPropertyPtr != NULL)
+		{
+			baseAddress = *((UInt32*)aPropertyPtr->getBytesNoCopy());
+			baseAddress = ml_io_map(baseAddress, 0x1000);
+			//baseAddress = (UInt32)pmap_extract(kernel_pmap,(vm_address_t)baseAddress);
+		}
+		else
+		{
 
-    t = OSDynamicCast(OSData, provider->getProperty("AAPL,address"));
-    if (t != NULL) {
-        baseAddress = *((UInt32*)t->getBytesNoCopy());
-        baseAddress = ml_io_map(baseAddress, 0x1000);
-        //baseAddress = (UInt32)pmap_extract(kernel_pmap,(vm_address_t)baseAddress);
-    }
-    else {
-#ifdef DEBUGMODE
-        IOLog( "PPCI2CInterface::start missing property AAPL,address in i2c registry\n");
-#endif
-        return false;
-    }
-#else
-    i2cRegisterMap = provider->mapDeviceMemoryWithIndex(1);
-    if ( i2cRegisterMap == NULL ) {
-#ifdef DEBUGMODE
-        IOLog( "PPCI2CInterface::start missing i2cRegisterMap\n");
-#endif
-        return false;
-    }
-    else
-        baseAddress = (UInt32)pmap_extract(kernel_pmap,(vm_address_t)i2cRegisterMap->getVirtualAddress());
-#endif
+			DEBUGLOG( "PPCI2CInterface::start missing property AAPL,address in i2c registry\n");
 
-    t = OSDynamicCast(OSData, provider->getProperty("AAPL,address-step"));
-    if (t != NULL)
-        addressSteps = *((UInt32*)t->getBytesNoCopy());
-    else {
-#ifdef DEBUGMODE
-        IOLog( "PPCI2CInterface::start missing property AAPL,address-step in i2c registry\n");
-#endif
-        return false;
-    }
+			return false;
+		}
 
-    t = OSDynamicCast(OSData, provider->getProperty("AAPL,i2c-rate"));
-    if (t != NULL)
-        rate = *((UInt32*)t->getBytesNoCopy());
-    else {
-#ifdef DEBUGMODE
-        IOLog( "PPCI2CInterface::start missing property AAPL,i2c-rate in i2c registry\n");
-#endif
-        return false;
-    }
+#else	// old code - no longer used
 
-    if (!initI2CBus((UInt8*)baseAddress, (UInt8)addressSteps))   
-    return false;
+		i2cRegisterMap = provider->mapDeviceMemoryWithIndex(1);
+		if ( i2cRegisterMap == NULL )
+		{
 
-    } // This bracket ends the !pseudoI2C case.
-        
-    if (pseudoI2C) {
+			DEBUGLOG( "PPCI2CInterface::start missing i2cRegisterMap\n");
+
+			return false;
+		}
+		else
+			baseAddress = (UInt32)pmap_extract(kernel_pmap,(vm_address_t)i2cRegisterMap->getVirtualAddress());
+#endif	// TRUE
+
+		aPropertyPtr = OSDynamicCast(OSData, provider->getProperty("AAPL,address-step"));
+		if (aPropertyPtr != NULL)
+			addressSteps = *((UInt32*)aPropertyPtr->getBytesNoCopy());
+		else
+		{
+			// one could argue that this should be a non-debug kprintf()...
+			DEBUGLOG( "PPCI2CInterface::start missing property AAPL,address-step in i2c registry\n");
+
+			return false;
+		}
+
+		aPropertyPtr = OSDynamicCast(OSData, provider->getProperty("AAPL,i2c-rate"));
+		if (aPropertyPtr == NULL)	// unable to find 'AAPL,ic2-rate' property - warn and exit
+		{
+			// one could argue that this should be a non-debug kprintf()...
+			DEBUGLOG( "PPCI2CInterface::start missing property AAPL,i2c-rate in i2c registry\n");
+
+			return false;
+		}
+		rate = *((UInt32*)aPropertyPtr->getBytesNoCopy());
+
+		if (!initI2CBus((UInt8*)baseAddress, (UInt8)addressSteps))   
+			return false;
+
+		if (!setKhzSpeed((UInt) rate))
+			return false;
+
+    } // if ( ! pseudoI2C )
+	else	// if ( pseudoI2C )
+	{
         setKhzSpeed(100);     	 // PMU case specifics
     	clientMutexLock = NULL;  // Creates the mutex lock to protect the PMU clients list
         clientMutexLock = IOLockAlloc();
-        }
-        
-    else if (!setKhzSpeed((UInt)rate))
-        return false;
+	}
 
+#if defined( __ppc__ )
+	loopTime = SpinLoop (100000) / 1000;				// loopTime time in microseconds
+	loopsPerMic = ((100000 / loopTime) * 4) / 3;		// number of loops per microsecond - 4/3 is fudge factor for vagaries of spin loops
+	if (loopsPerMic == 0)
+		loopsPerMic = 1;								// make sure we do at least one loop
+#endif
+	
     // remembers the provider:
     myProvider = provider;
 
@@ -1005,11 +1055,12 @@ PPCI2CInterface::setPollingMode(bool newPollingMode)
 #endif // DEBUGMODE
     // If I am not the owner of the lock returns without doing anything.
 	// Interrupt context calls do not (should not) call setPollingMode currently...
-    if (!IORecursiveLockHaveLock(mutexLock)) {
-#ifdef DEBUGMODE
-        IOLog("PPCI2CInterface::setPollingMode(%s) I am not the owner of the lock returns without doing anything.\n",
+    if (!IORecursiveLockHaveLock(mutexLock))
+	{
+
+        DEBUGLOG("PPCI2CInterface::setPollingMode(%s) I am not the owner of the lock returns without doing anything.\n",
               (newPollingMode ? "true" : "false"));
-#endif // DEBUGMODE
+
         return false;   
     }
 
@@ -1062,10 +1113,11 @@ void
 PPCI2CInterface::setDumbMode()
 {
     // If I am not the owner of the lock returns without doing anything.
-    if (!IORecursiveLockHaveLock(mutexLock)) {
-#ifdef DEBUGMODE
-        IOLog("PPCI2CInterface::setDumbMode I am not the owner of the lock returns without doing anything.\n");
-#endif // DEBUGMODE
+    if (!IORecursiveLockHaveLock(mutexLock))
+	{
+
+        DEBUGLOG("PPCI2CInterface::setDumbMode I am not the owner of the lock returns without doing anything.\n");
+
         return;
     }
 
@@ -1079,10 +1131,11 @@ void
 PPCI2CInterface::setStandardMode()
 {
     // If I am not the owner of the lock returns without doing anything.
-    if (!IORecursiveLockHaveLock(mutexLock)) {
-#ifdef DEBUGMODE
-        IOLog("PPCI2CInterface::setStandardMode I am not the owner of the lock returns without doing anything.\n");
-#endif // DEBUGMODE
+    if (!IORecursiveLockHaveLock(mutexLock))
+	{
+
+        DEBUGLOG("PPCI2CInterface::setStandardMode I am not the owner of the lock returns without doing anything.\n");
+
         return;
     }
 
@@ -1094,13 +1147,15 @@ PPCI2CInterface::setStandardMode()
 void
 PPCI2CInterface::setStandardSubMode()
 {
-    // If I am not the owner of the lock returns without doing anything.
-    if (!IORecursiveLockHaveLock(mutexLock)) {
-#ifdef DEBUGMODE
-        IOLog("PPCI2CInterface::setStandardSubMode I am not the owner of the lock returns without doing anything.\n");
-#endif // DEBUGMODE
-        return;
-    }
+	if (!ml_at_interrupt_context())
+		// If I am not the owner of the lock returns without doing anything.
+		if (!IORecursiveLockHaveLock(mutexLock))
+		{
+
+			DEBUGLOG("PPCI2CInterface::setStandardSubMode I am not the owner of the lock returns without doing anything.\n");
+
+			return;
+		}
 
     if (pseudoI2C)
         setMode(kSubaddressI2CStream);
@@ -1111,13 +1166,15 @@ PPCI2CInterface::setStandardSubMode()
 void
 PPCI2CInterface::setCombinedMode()
 {
-    // If I am not the owner of the lock returns without doing anything.
-    if (!IORecursiveLockHaveLock(mutexLock)) {
-#ifdef DEBUGMODE
-        IOLog("PPCI2CInterface::setCombinedMode I am not the owner of the lock returns without doing anything.\n");
-#endif // DEBUGMODE
-        return;
-    }
+	if (!ml_at_interrupt_context())
+		// If I am not the owner of the lock returns without doing anything.
+		if (!IORecursiveLockHaveLock(mutexLock))
+		{
+
+			DEBUGLOG("PPCI2CInterface::setCombinedMode I am not the owner of the lock returns without doing anything.\n");
+
+			return;
+		}
 
     if (pseudoI2C)
         setMode(kCombinedI2CStream);
@@ -1130,10 +1187,11 @@ bool
 PPCI2CInterface::isInDumbMode()
 {
     // If I am not the owner of the lock returns without doing anything.
-    if (!IORecursiveLockHaveLock(mutexLock)) {
-#ifdef DEBUGMODE
-        IOLog("PPCI2CInterface::isInDumbMode I am not the owner of the lock returns without doing anything.\n");
-#endif // DEBUGMODE
+    if (!IORecursiveLockHaveLock(mutexLock))
+	{
+
+        DEBUGLOG("PPCI2CInterface::isInDumbMode I am not the owner of the lock returns without doing anything.\n");
+
         return false;
     }
     
@@ -1144,10 +1202,11 @@ bool
 PPCI2CInterface::isInStandardMode()
 {
     // If I am not the owner of the lock returns without doing anything.
-    if (!IORecursiveLockHaveLock(mutexLock)) {
-#ifdef DEBUGMODE
-        IOLog("PPCI2CInterface::isInStandardMode I am not the owner of the lock returns without doing anything.\n");
-#endif // DEBUGMODE
+    if (!IORecursiveLockHaveLock(mutexLock))
+	{
+
+        DEBUGLOG("PPCI2CInterface::isInStandardMode I am not the owner of the lock returns without doing anything.\n");
+
         return false;
     }
 
@@ -1159,10 +1218,11 @@ bool
 PPCI2CInterface::isInStandardSubMode()
 {
     // If I am not the owner of the lock returns without doing anything.
-    if (!IORecursiveLockHaveLock(mutexLock)) {
-#ifdef DEBUGMODE
-        IOLog("PPCI2CInterface::isInStandardSubMode I am not the owner of the lock returns without doing anything.\n");
-#endif // DEBUGMODE
+    if (!IORecursiveLockHaveLock(mutexLock))
+    {
+
+        DEBUGLOG("PPCI2CInterface::isInStandardSubMode I am not the owner of the lock returns without doing anything.\n");
+
         return false;
     }
     
@@ -1173,10 +1233,11 @@ bool
 PPCI2CInterface::isInCombinedMode()
 {
     // If I am not the owner of the lock returns without doing anything.
-    if (!IORecursiveLockHaveLock(mutexLock)) {
-#ifdef DEBUGMODE
-        IOLog("PPCI2CInterface::isInCombinedMode I am not the owner of the lock returns without doing anything.\n");
-#endif // DEBUGMODE
+    if (!IORecursiveLockHaveLock(mutexLock))
+	{
+
+        DEBUGLOG("PPCI2CInterface::isInCombinedMode I am not the owner of the lock returns without doing anything.\n");
+
         return false;
     }
 
@@ -1188,10 +1249,11 @@ UInt
 PPCI2CInterface::getKhzSpeed()
 {
     // If I am not the owner of the lock returns without doing anything.
-    if (!IORecursiveLockHaveLock(mutexLock)) {
-#ifdef DEBUGMODE
-            IOLog("PPCI2CInterface::getKhzSpeed I am not the owner of the lock returns without doing anything.\n");
-#endif // DEBUGMODE
+    if (!IORecursiveLockHaveLock(mutexLock))
+	{
+
+            DEBUGLOG("PPCI2CInterface::getKhzSpeed I am not the owner of the lock returns without doing anything.\n");
+
         return 0;
     }
     switch((int)getSpeed())
@@ -1222,17 +1284,16 @@ PPCI2CInterface::openI2CBus(UInt8 port)
     // touch the i2C bus (until we close it).
 
 #ifdef DEBUGMODE
-    //if (!IORecursiveLockTryLock(mutexLock)) {
+    //if (!IORecursiveLockTryLock(mutexLock))
+	//{
     //    IOLog("PPCI2CInterface::openI2CBus PPCI2CInterface->mutexLock is already locked and I can't take it.\n");
     //    return false;
     //}
-
-    IOLog("PPCI2CInterface::openI2CBus attempting to access to PPCI2CInterface->mutexLock.\n");
-    IORecursiveLockLock(mutexLock);
-    IOLog("PPCI2CInterface::openI2CBus PPCI2CInterface->mutexLock locked.\n");
-#else // !DEBUGMODE
-    IORecursiveLockLock(mutexLock);
 #endif // DEBUGMODE
+
+    DEBUGLOG("PPCI2CInterface::openI2CBus attempting to access to PPCI2CInterface->mutexLock.\n");
+    IORecursiveLockLock(mutexLock);
+    DEBUGLOG("PPCI2CInterface::openI2CBus PPCI2CInterface->mutexLock locked.\n");
 
 	if (i2cSMU)  //ask SMU to take a lock
 		{
@@ -1240,12 +1301,13 @@ PPCI2CInterface::openI2CBus(UInt8 port)
 			kprintf("PPCI2CInterface::openI2CBus ON SMU DIDN'T WORK !!\n");
 		}
 		
-    if (pseudoI2C)  {
+    if (pseudoI2C)
+	{
         lastMode = kSimpleI2CStream;	//Default case, unless changed after openI2CBus with set...Mode command
 #ifdef DEBUGPMU
         IOLog(" APPLE I2C-PMU  Try to open I2CBus..................port = 0x%2x, mode = 0x%2x\n", port, lastMode);
 #endif // DEBUGPMU
-        }
+	}
 	
 	// In i2cSMU case, setPort() uses portRegSelect from "reg" property instead of port.
     setPort(port);
@@ -1273,10 +1335,10 @@ PPCI2CInterface::writeI2CBus(UInt8 address, UInt8 subAddress, UInt8 *newData, UI
 	// you better know what you're doing
 	if (!ml_at_interrupt_context())
 		// If I am not the owner of the lock returns without doing anything.
-		if (!IORecursiveLockHaveLock(mutexLock)) {
-	#if DEBUGMODE
-			IOLog("PPCI2CInterface::writeI2CBus I am not the owner of the lock returns without doing anything.\n");
-	#endif // DEBUGMODE
+		if (!IORecursiveLockHaveLock(mutexLock))
+		{
+			DEBUGLOG("PPCI2CInterface::writeI2CBus I am not the owner of the lock returns without doing anything.\n");
+
 			return false;
 		}
 
@@ -1369,10 +1431,9 @@ PPCI2CInterface::readI2CBus(UInt8 address, UInt8 subAddress, UInt8 *newData, UIn
 	// you better know what you're doing
 	if (!ml_at_interrupt_context())
 		// If I am not the owner of the lock returns without doing anything.
-		if (!IORecursiveLockHaveLock(mutexLock)) {
-	#if DEBUGMODE
-			IOLog("PPCI2CInterface::readI2CBus I am not the owner of the lock returns without doing anything.\n");
-	#endif // DEBUGMODE
+		if (!IORecursiveLockHaveLock(mutexLock))
+		{
+			DEBUGLOG("PPCI2CInterface::readI2CBus I am not the owner of the lock returns without doing anything.\n");
 			return false;
 		}
 
@@ -1468,10 +1529,9 @@ PPCI2CInterface::closeI2CBus()
 {
 	// Interrupt context calls do not (should not) call openI2CBus ...
     // If I am not the owner of the lock returns without doing anything.
-    if (!IORecursiveLockHaveLock(mutexLock)) {
-#if DEBUGMODE
-            IOLog("PPCI2CInterface::closeI2CBus I am not the owner of the lock returns without doing anything.\n");
-#endif // DEBUGMODE
+    if (!IORecursiveLockHaveLock(mutexLock))
+	{
+            DEBUGLOG("PPCI2CInterface::closeI2CBus I am not the owner of the lock returns without doing anything.\n");
         return false;
     }
 
@@ -1489,9 +1549,8 @@ PPCI2CInterface::closeI2CBus()
     // And releases the lock:
     IORecursiveLockUnlock(mutexLock);
 
-#if DEBUGMODE
-    IOLog("PPCI2CInterface::closeI2CBus PPCI2CInterface->mutexLock unlocked.\n");
-#endif // DEBUGMODE
+    DEBUGLOG("PPCI2CInterface::closeI2CBus PPCI2CInterface->mutexLock unlocked.\n");
+
 #ifdef DEBUGPMU
     if (pseudoI2C)
         IOLog("      APPLE I2C-PMU  CLOSED ,  SUCCESSFULLY! \n");
@@ -1538,9 +1597,7 @@ PPCI2CInterface::getResourceName()
 			}
 		}
     
-#ifdef DEBUGMODE
-    IOLog("PPCI2CInterface::getResourceName returns \"%s\"\n",resourceName);
-#endif // DEBUGMODE
+    DEBUGLOG("PPCI2CInterface::getResourceName returns \"%s\"\n",resourceName);
     
     return (resourceName);
 }
@@ -1682,15 +1739,15 @@ PPCI2CInterface::ApplePMUSendMiscCommand( UInt32 command,
                         IOByteCount sendLength, UInt8 * sendBuffer,
                         IOByteCount * readLength, UInt8 * readBuffer )
 {
-    struct SendMiscCommandParameterBlock {
-        int command;  
-        IOByteCount sLength;
-        UInt8 *sBuffer;
-        IOByteCount *rLength; 
-        UInt8 *rBuffer;
-    };
-    IOReturn ret = kIOReturnError;
-    static IOService * pmu = 0;
+struct SendMiscCommandParameterBlock
+{
+	int command;  
+	IOByteCount sLength;
+	UInt8 *sBuffer;
+	IOByteCount *rLength; 
+	UInt8 *rBuffer;
+};
+IOReturn ret = kIOReturnError;
 
     // Wait for the PMU to show up:
     if( !pmu)
@@ -1876,10 +1933,10 @@ void
 PPCI2CInterface::setStandardSub4Mode()
 {
     // If I am not the owner of the lock returns without doing anything.
-    if (!IORecursiveLockHaveLock(mutexLock)) {
-#ifdef DEBUGMODE
-        IOLog("PPCI2CInterface::setStandardSub4Mode I am not the owner of the lock returns without doing anything.\n");
-#endif // DEBUGMODE
+    if (!IORecursiveLockHaveLock(mutexLock))
+	{
+        DEBUGLOG("PPCI2CInterface::setStandardSub4Mode I am not the owner of the lock returns without doing anything.\n");
+
         return;
     }
 
@@ -1900,10 +1957,10 @@ void
 PPCI2CInterface::setCombined4Mode()
 {
     // If I am not the owner of the lock returns without doing anything.
-    if (!IORecursiveLockHaveLock(mutexLock)) {
-#ifdef DEBUGMODE
-        IOLog("PPCI2CInterface::setCombined4Mode I am not the owner of the lock returns without doing anything.\n");
-#endif // DEBUGMODE
+    if (!IORecursiveLockHaveLock(mutexLock))
+	{
+        DEBUGLOG("PPCI2CInterface::setCombined4Mode I am not the owner of the lock returns without doing anything.\n");
+
         return;
     }
 
@@ -1927,9 +1984,6 @@ PPCI2CInterface::AppleSMUSendI2CCommand( IOService *smu,
         UInt8 *rBuffer;
     };
     IOReturn ret = kIOReturnError;
-	static const OSSymbol *i2cCommandSym = OSSymbol::withCStringNoCopy("sendSMUI2CCommand");
-	static const OSSymbol *i2cOpenSym = OSSymbol::withCStringNoCopy("openSMUI2CCommand");
-	static const OSSymbol *i2cCloseSym = OSSymbol::withCStringNoCopy("closeSMUI2CCommand");
 
     SendI2CCommandParameterBlock params = { sendLength, sendBuffer,
                                                       readLength, readBuffer };
@@ -2418,7 +2472,6 @@ PPCI2CInterface::calli2cClient(UInt8 interruptMask, UInt32 length, UInt8 * buffe
 PPCI2CInterface::registerForI2cInterrupts(UInt32 addressInfo, AppleI2Cclient function, IOService * caller)
 {
     IOReturn ret = kIOReturnError;
-    static IOService * pmu;
 
     // Wait for the PMU to show up.
     // If already register with PMU, don't bother registering again
