@@ -40,7 +40,18 @@ export GDB_DYLD_PATHS_ROOT
 export GDB_DYLD_IMAGE_SUFFIX
 export GDB_DYLD_INSERT_LIBRARIES
 
-host_architecture=`(unset DYLD_PRINT_LIBRARIES; "arch") 2>/dev/null` || host_architecture=""
+# dyld will warn if any of these are set and the user invokes a setgid program
+# like gdb.
+unset DYLD_FRAMEWORK_PATH
+unset DYLD_FALLBACK_FRAMEWORK_PATH
+unset DYLD_LIBRARY_PATH
+unset DYLD_FALLBACK_LIBRARY_PATH
+unset DYLD_ROOT_PATH
+unset DYLD_PATHS_ROOT
+unset DYLD_IMAGE_SUFFIX
+unset DYLD_INSERT_LIBRARIES
+
+host_architecture=`/usr/bin/arch 2>/dev/null` || host_architecture=""
 
 if [ -z "$host_architecture" ]; then
     echo "There was an error executing 'arch(1)'; assuming 'ppc'.";
@@ -104,6 +115,24 @@ case "$architecture_to_use" in
         gdb="${GDB_ROOT}/usr/libexec/gdb/gdb-powerpc-apple-darwin"
         ;;
 esac
+
+# When running under CodeWarrior we want to invoke a gdb binary
+# specifically intended/qualified for its use.
+
+parent=`ps -Awwwo pid,command | 
+          awk -v ppid=$PPID '{if ($1 == ppid ) {print}}' |
+          sed -e 's,^ *,,' -e 's,[^ ]* *,,'`
+if [ -n "$parent" ]
+then
+  case "$parent" in
+    *CodeWarrior*)
+      if [ -x "${GDBROOT}/usr/libexec/gdb/gdb-for-codewarrior" ]
+      then
+        gdb="${GDBROOT}/usr/libexec/gdb/gdb-for-codewarrior"
+      fi
+    ;;
+  esac
+fi
 
 if [ ! -x "$gdb" ]; then
     echo "Unable to start GDB: cannot find binary in '$gdb'"

@@ -21,11 +21,6 @@
    Foundation, Inc., 59 Temple Place - Suite 330,
    Boston, MA 02111-1307, USA.  */
 
-#include "macosx-nat-inferior.h"
-#include "macosx-nat-inferior-util.h"
-#include "macosx-nat-inferior-debug.h"
-#include "macosx-nat-mutils.h"
-
 #include "defs.h"
 #include "inferior.h"
 #include "target.h"
@@ -38,6 +33,11 @@
 #include <stdio.h>
 #include <sys/param.h>
 #include <sys/dir.h>
+
+#include "macosx-nat-inferior.h"
+#include "macosx-nat-inferior-util.h"
+#include "macosx-nat-inferior-debug.h"
+#include "macosx-nat-mutils.h"
 
 extern macosx_inferior_status *macosx_status;
 
@@ -54,27 +54,61 @@ macosx_setup_registers_before_hand_call ()
 
 #if defined (TARGET_I386)
 
-#include "i386-macosx-thread-status.h"
+/* Set/clear bit 8 (Trap Flag) of the EFLAGS processor control
+   register to enable/disable single-step mode.  Handle new-style 
+   32-bit, 64-bit, and old-style 32-bit interfaces in this function.  
+   VALUE is a boolean, indicating whether to set (1) the Trap Flag 
+   or clear it (0).  */
 
 kern_return_t
 modify_trace_bit (thread_t thread, int value)
 {
-  i386_thread_state_t state;
-  unsigned int state_count = i386_THREAD_STATE_COUNT;
+  gdb_x86_thread_state_t state;
+  unsigned int state_count = GDB_x86_THREAD_STATE_COUNT;
   kern_return_t kret;
 
-  kret =
-    thread_get_state (thread, i386_THREAD_STATE, (thread_state_t) & state,
-                      &state_count);
-  MACH_PROPAGATE_ERROR (kret);
-
-  if ((state.eflags & 0x100UL) != (value ? 1 : 0))
+  kret = thread_get_state (thread, GDB_x86_THREAD_STATE, 
+                           (thread_state_t) &state, &state_count);
+  if (kret == KERN_SUCCESS &&
+      (state.tsh.flavor == GDB_x86_THREAD_STATE32 ||
+       state.tsh.flavor == GDB_x86_THREAD_STATE64))
     {
-      state.eflags = (state.eflags & ~0x100UL) | (value ? 0x100UL : 0);
-      kret =
-        thread_set_state (thread, i386_THREAD_STATE, (thread_state_t) & state,
-                          state_count);
+      if (state.tsh.flavor == GDB_x86_THREAD_STATE32 
+          && (state.uts.ts32.eflags & 0x100UL) != (value ? 1 : 0))
+        {
+          state.uts.ts32.eflags = 
+                    (state.uts.ts32.eflags & ~0x100UL) | (value ? 0x100UL : 0);
+          kret = thread_set_state (thread, GDB_x86_THREAD_STATE32, 
+                                   (thread_state_t) & state.uts.ts32,
+                                   GDB_x86_THREAD_STATE32_COUNT);
+          MACH_PROPAGATE_ERROR (kret);
+        }
+      else if (state.tsh.flavor == GDB_x86_THREAD_STATE64 
+               && (state.uts.ts64.rflags & 0x100UL) != (value ? 1 : 0))
+        {
+          state.uts.ts64.rflags = 
+                     (state.uts.ts64.rflags & ~0x100UL) | (value ? 0x100UL : 0);
+          kret = thread_set_state (thread, GDB_x86_THREAD_STATE, 
+                                   (thread_state_t) &state, state_count);
+          MACH_PROPAGATE_ERROR (kret);
+        }
+    }
+  else
+    {
+      gdb_i386_thread_state_t state;
+      
+      state_count = GDB_i386_THREAD_STATE_COUNT;
+      kret = thread_get_state (thread, GDB_i386_THREAD_STATE, 
+                               (thread_state_t) &state, &state_count);
       MACH_PROPAGATE_ERROR (kret);
+
+      if ((state.eflags & 0x100UL) != (value ? 1 : 0))
+        {
+          state.eflags = (state.eflags & ~0x100UL) | (value ? 0x100UL : 0);
+          kret = thread_set_state (thread, GDB_i386_THREAD_STATE, 
+                                   (thread_state_t) &state, state_count);
+          MACH_PROPAGATE_ERROR (kret);
+        }
     }
 
   return KERN_SUCCESS;
