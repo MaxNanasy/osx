@@ -686,7 +686,7 @@
 			);
 			buildSettings = {
 				BUILD_VARIANTS = "normal debug nopic";
-				CURRENT_PROJECT_VERSION = 26545;
+				CURRENT_PROJECT_VERSION = 27774;
 				LIBRARY_STYLE = STATIC;
 				OPT_CFLAGS = "-DNDEBUG -Os $(OPT_INLINEFLAGS)";
 				OPT_CPPFLAGS = "$(OPT_CFLAGS)";
