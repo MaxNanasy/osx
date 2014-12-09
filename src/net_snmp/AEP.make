@@ -1,11 +1,11 @@
 ##
 # Makefile for Apple Release Control (Archive Extraction & Patch)
 #
-# Copyright (c) 2005 Apple Computer, Inc.
+# Copyright (c) 2005-2006 Apple Computer, Inc.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
-# Portions Copyright (c) 2005 Apple Computer, Inc.  All Rights
+# Portions Copyright (c) 2005-2006 Apple Computer, Inc.  All Rights
 # Reserved.  This file contains Original Code and/or Modifications of
 # Original Code as defined in and that are subject to the Apple Public
 # Source License Version 1.1 (the "License").  You may not use this file
@@ -31,20 +31,32 @@
 #  AEP_Patches - list of file names (from patches subdirectory) to
 #                run thru patch and apply to extracted sources
 #  AEP_LicenseFile - full path to license file
-#  AEPBuildInSources - build in Sources directory instead of BuildDirectory
+#  AEP_BuildInSources - build in Sources directory instead of BuildDirectory
 #
 # The following variables will be defined if empty:
-#  AEP_Project           [ $(Project)                             ]
-#  AEP_Version           [ <no default>                           ]
-#  AEP_ProjVers          [ $(AEP_Project)-$(AEP_Version)          ]
-#  AEP_Filename          [ $(AEP_ProjVers).tar.gz                 ]
-#  AEP_ExtractDir        [ $(AEP_ProVers)                         ]
-#  AEP_Patches           [ <list of patch file to apply>          ]
-#  AEP_LicenseFile       [ $(SRCROOT)/$(ProjectName).txt          ]
+#  AEP_Project           [ $(Project)                                ]
+#  AEP_Version           [ <no default>                              ]
+#  AEP_ProjVers          [ $(AEP_Project)-$(AEP_Version)             ]
+#  AEP_Filename          [ $(AEP_ProjVers).tar.[bg]z*                ]
+#  AEP_ExtractDir        [ $(AEP_ProVers)                            ]
+#  AEP_Patches           [ <list of patch file to apply>             ]
+#  AEP_LicenseFile       [ $(SRCROOT)/$(ProjectName).txt             ]
+#  AEP_ConfigDir         [ $(ETCDIR)                                 ]
 #
+# Additionally, the following variables may also be defined before
+# including this file:
+#  AEP_LaunchdConfigs - launchd config files in SRCROOT to be installed
+#                       into LAUNCHDDIR
+#  AEP_StartupItem - startup items name to be installed into
+#                    SYSTEM_STARTUP_DIR; assumes existence of
+#                    StartupParameters.plist and Localizable.strings
+#  AEP_ManPages - man pages provided outside the extracted project
+#  AEP_ConfigFiles - standard set of configuration files; ".default" versions
+#                    will be created as well
 ##
 
-GnuAfterInstall += install-open-source-files
+GnuAfterInstall += install-startup-files install-open-source-files
+GnuAfterInstall += install-top-level-man-pages install-configuration-files
 
 
 #
@@ -63,7 +75,7 @@ ifndef AEP_ProjVers
 endif
 
 ifndef AEP_Filename
-    AEP_Filename	= $(wildcard $(AEP_ProjVers).tar.[gb]z*)
+    AEP_Filename	= $(wildcard $(AEP_ProjVers).tar.gz $(AEP_ProjVers).tar.bz2)
 endif
 ifeq ($(suffix $(AEP_Filename)),.bz2)
     AEP_ExtractOption	= j
@@ -82,6 +94,13 @@ ifndef AEP_LicenseFile
     AEP_LicenseFile	= $(SRCROOT)/$(ProjectName).txt
 endif
 
+ifndef AEP_ManPages
+    AEP_ManPages := $(wildcard *.[1-9] man/*.[1-9])
+endif
+
+ifndef AEP_ConfigDir
+    AEP_ConfigDir	= $(ETCDIR)
+endif
 
 #AEP_ExtractRoot		= $(SRCROOT)
 AEP_ExtractRoot		= $(OBJROOT)
@@ -101,11 +120,15 @@ endif
 OSVDIR	= /usr/local/OpenSourceVersions
 OSLDIR	= /usr/local/OpenSourceLicenses
 
+# Launchd / startup item paths
+LAUNCHDDIR		= $(NSSYSTEMDIR)$(NSLIBRARYSUBDIR)/LaunchDaemons
+SYSTEM_STARTUP_DIR	= $(NSSYSTEMDIR)$(NSLIBRARYSUBDIR)/StartupItems
+
 
 #
 # AEP targets
 #
-.PHONY: extract-source install-open-source-files
+.PHONY: extract-source install-open-source-files install-startup-files install-top-level-man-pages
 
 $(GNUConfigStamp): extract-source
 
@@ -118,9 +141,24 @@ ifeq ($(AEP),YES)
 	$(_v) $(RM) $(GNUConfigStamp)
 	$(MV) $(AEP_ExtractRoot)/$(AEP_ExtractDir) $(Sources)
 	for patchfile in $(AEP_Patches); do \
-	   echo $$patchfile; \
+	   echo "Applying $$patchfile..."; \
 	   cd $(Sources) && patch -lp1 < $(SRCROOT)/patches/$$patchfile; \
 	done
+endif
+
+install-startup-files::
+ifdef AEP_LaunchdConfigs
+	@echo "Installing launchd configuration files..."
+	$(INSTALL_DIRECTORY) $(DSTROOT)$(LAUNCHDDIR)
+	$(INSTALL_FILE) $(AEP_LaunchdConfigs) $(DSTROOT)$(LAUNCHDDIR)
+endif
+ifdef AEP_StartupItem
+	@echo "Installing StartupItem..."
+	$(INSTALL_DIRECTORY) $(DSTROOT)$(SYSTEM_STARTUP_DIR)/$(AEP_StartupItem)
+	$(INSTALL_SCRIPT) $(StartupItem) $(DSTROOT)$(SYSTEM_STARTUP_DIR)/$(AEP_StartupItem)
+	$(INSTALL_FILE) StartupParameters.plist $(DSTROOT)$(SYSTEM_STARTUP_DIR)/$(AEP_StartupItem)
+	$(INSTALL_DIRECTORY) $(DSTROOT)$(SYSTEM_STARTUP_DIR)/$(AEP_StartupItem)/Resources/English.lproj
+	$(INSTALL_FILE) Localizable.strings $(DSTROOT)$(SYSTEM_STARTUP_DIR)/$(AEP_StartupItem)/Resources/English.lproj
 endif
 
 install-open-source-files::
@@ -131,6 +169,40 @@ ifneq ($(AEP_LicenseFile),)
 	$(MKDIR) $(DSTROOT)/$(OSLDIR)
 	$(INSTALL_FILE) $(AEP_LicenseFile) $(DSTROOT)/$(OSLDIR)/$(ProjectName).txt
 endif
+
+
+#
+# Install any man pages at the top-level directory or its "man" subdirectory
+#
+install-top-level-man-pages::
+ifdef AEP_ManPages
+	@echo "Installing top-level man pages..."
+	for _page in $(AEP_ManPages); do				\
+		_section_dir=$(Install_Man)/man$${_page##*\.};		\
+		$(INSTALL_DIRECTORY) $(DSTROOT)$${_section_dir};	\
+		$(INSTALL_FILE) $${_page} $(DSTROOT)$${_section_dir};	\
+	done
+endif
+
+
+#
+# Install configuration files and their corresponding ".default" files
+# to one standard location.
+#
+install-configuration-files::
+ifdef AEP_ConfigFiles
+	@echo "Installing snmpd configuration files..."
+	$(INSTALL_DIRECTORY) $(DSTROOT)$(AEP_ConfigDir)
+	for file in $(AEP_ConfigFiles); \
+	do \
+		$(INSTALL_FILE) $${file} $(DSTROOT)$(AEP_ConfigDir); \
+		$(CHMOD) u+w $(DSTROOT)$(AEP_ConfigDir)/$${file}; \
+		if [ "${file##*.}" != "default" ]; then \
+			$(INSTALL_FILE) $${file} $(DSTROOT)$(AEP_ConfigDir)/$${file}.default; \
+		fi; \
+	done
+endif
+
 
 clean::
 	$(_v) if [ -d $(Sources) ]; then \
