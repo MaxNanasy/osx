@@ -56,18 +56,18 @@
   DONE;
 })
 
+;; APPLE LOCAL begin mainline candidate 4476324
 (define_insn "*mov<mode>_internal"
   [(set (match_operand:SSEMODEI 0 "nonimmediate_operand" "=x,x ,m")
-	(match_operand:SSEMODEI 1 "vector_move_operand"  "C ,xm,x"))]
+	(match_operand:SSEMODEI 1 "nonimmediate_or_sse_const_operand"  "C ,xm,x"))]
+;; APPLE LOCAL end mainline candidate 4476324
   "TARGET_SSE && !(MEM_P (operands[0]) && MEM_P (operands[1]))"
 {
   switch (which_alternative)
     {
     case 0:
-      if (get_attr_mode (insn) == MODE_V4SF)
-	return "xorps\t%0, %0";
-      else
-	return "pxor\t%0, %0";
+      /* APPLE LOCAL mainline candidate 4283414 */
+      return standard_sse_constant_opcode (insn, operands[1]);
     case 1:
     case 2:
       if (get_attr_mode (insn) == MODE_V4SF)
@@ -108,14 +108,26 @@
   DONE;
 })
 
+;; APPLE LOCAL begin mainline candidate 4476324
 (define_insn "*movv4sf_internal"
   [(set (match_operand:V4SF 0 "nonimmediate_operand" "=x,x,m")
-	(match_operand:V4SF 1 "vector_move_operand" "C,xm,x"))]
+	(match_operand:V4SF 1 "nonimmediate_or_sse_const_operand" "C,xm,x"))]
   "TARGET_SSE"
-  "@
-   xorps\t%0, %0
-   movaps\t{%1, %0|%0, %1}
-   movaps\t{%1, %0|%0, %1}"
+;; APPLE LOCAL end mainline candidate 4476324
+/* APPLE LOCAL begin mainline candidate 4283414 */
+{
+  switch (which_alternative)
+    {
+    case 0:
+      return standard_sse_constant_opcode (insn, operands[1]);
+    case 1:
+    case 2:
+      return "movaps\t{%1, %0|%0, %1}";
+    default:
+      abort();
+    }
+}
+/* APPLE LOCAL end mainline candidate 4283414 */
   [(set_attr "type" "sselog1,ssemov,ssemov")
    (set_attr "mode" "V4SF")])
 
@@ -142,18 +154,18 @@
   DONE;
 })
 
+;; APPLE LOCAL begin mainline candidate 4476324
 (define_insn "*movv2df_internal"
   [(set (match_operand:V2DF 0 "nonimmediate_operand" "=x,x,m")
-	(match_operand:V2DF 1 "vector_move_operand" "C,xm,x"))]
+	(match_operand:V2DF 1 "nonimmediate_or_sse_const_operand" "C,xm,x"))]
   "TARGET_SSE && !(MEM_P (operands[0]) && MEM_P (operands[1]))"
+;; APPLE LOCAL end mainline candidate 4476324
 {
   switch (which_alternative)
     {
     case 0:
-      if (get_attr_mode (insn) == MODE_V4SF)
-	return "xorps\t%0, %0";
-      else
-	return "xorpd\t%0, %0";
+      /* APPLE LOCAL mainline candidate 4283414 */
+      return standard_sse_constant_opcode (insn, operands[1]);
     case 1:
     case 2:
       if (get_attr_mode (insn) == MODE_V4SF)
@@ -733,6 +745,23 @@
   [(set_attr "type" "ssecomi")
    (set_attr "mode" "SF")])
 
+;; APPLE LOCAL begin mainline April 14, 2005  Radar 4053179
+(define_expand "vcondv4sf"
+  [(set (match_operand:V4SF 0 "register_operand" "")
+        (if_then_else:V4SF
+          (match_operator 3 ""
+            [(match_operand:V4SF 4 "nonimmediate_operand" "")
+             (match_operand:V4SF 5 "nonimmediate_operand" "")])
+          (match_operand:V4SF 1 "general_operand" "")
+          (match_operand:V4SF 2 "general_operand" "")))]
+  "TARGET_SSE"
+{
+  if (ix86_expand_fp_vcond (operands))
+    DONE;
+  else
+    FAIL;
+})
+;; APPLE LOCAL end mainline April 14, 2005 Radar 4053179
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Parallel single-precision floating point logical operations
@@ -796,6 +825,48 @@
   [(set_attr "type" "sselog")
    (set_attr "mode" "V4SF")])
 
+;; APPLE LOCAL begin mainline April 14, 2005 Radar 4053179
+;; Also define scalar versions.  These are used for abs, neg, and
+;; conditional move.  Using subregs into vector modes causes regiser
+;; allocation lossage.  These patterns do not allow memory operands
+;; because the native instructions read the full 128-bits.
+
+(define_insn "*andsf3"
+  [(set (match_operand:SF 0 "register_operand" "=x")
+       (and:SF (match_operand:SF 1 "register_operand" "0")
+               (match_operand:SF 2 "register_operand" "x")))]
+  "TARGET_SSE"
+  "andps\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sselog")
+   (set_attr "mode" "V4SF")])
+
+(define_insn "*nandsf3"
+  [(set (match_operand:SF 0 "register_operand" "=x")
+       (and:SF (not:SF (match_operand:SF 1 "register_operand" "0"))
+               (match_operand:SF 2 "register_operand" "x")))]
+  "TARGET_SSE"
+  "andnps\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sselog")
+   (set_attr "mode" "V4SF")])
+
+(define_insn "*iorsf3"
+  [(set (match_operand:SF 0 "register_operand" "=x")
+       (ior:SF (match_operand:SF 1 "register_operand" "0")
+               (match_operand:SF 2 "register_operand" "x")))]
+  "TARGET_SSE"
+  "orps\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sselog")
+   (set_attr "mode" "V4SF")])
+
+(define_insn "*xorsf3"
+  [(set (match_operand:SF 0 "register_operand" "=x")
+       (xor:SF (match_operand:SF 1 "register_operand" "0")
+               (match_operand:SF 2 "register_operand" "x")))]
+  "TARGET_SSE"
+  "xorps\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sselog")
+   (set_attr "mode" "V4SF")])
+;; APPLE LOCAL end mainline April 14, 2005 Radar 4053179
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Parallel single-precision floating point conversion operations
@@ -968,7 +1039,8 @@
 	(vec_select:V4SF
 	  (vec_concat:V8SF
 	    (match_operand:V4SF 1 "nonimmediate_operand" " 0,0,0,0")
-	    (match_operand:V4SF 2 "vector_move_operand" " C,x,m,x"))
+            /* APPLE LOCAL mainline candidate 4283414 */
+	    (match_operand:V4SF 2 "nonimmediate_or_0_operand" " C,x,m,x"))
 	  (parallel [(const_int 0)
 		     (const_int 1)
 		     (const_int 4)
@@ -1164,7 +1236,8 @@
   [(set (match_operand:V2SF 0 "register_operand"     "=x,x,*y,*y")
 	(vec_concat:V2SF
 	  (match_operand:SF 1 "nonimmediate_operand" " 0,m, 0, m")
-	  (match_operand:SF 2 "vector_move_operand"  " x,C,*y, C")))]
+          /* APPLE LOCAL mainline candidate 4283414 */
+	  (match_operand:SF 2 "nonimmediate_or_0_operand"  " x,C,*y, C")))]
   "TARGET_SSE"
   "@
    unpcklps\t{%2, %0|%0, %2}
@@ -1200,7 +1273,8 @@
 	(vec_merge:V4SF
 	  (vec_duplicate:V4SF
 	    (match_operand:SF 2 "general_operand"     " x,m,*r,x*rfF"))
-	  (match_operand:V4SF 1 "vector_move_operand" " 0,C,C ,0")
+          /* APPLE LOCAL mainline candidate 4283414 */
+	  (match_operand:V4SF 1 "nonimmediate_or_0_operand" " 0,C,C ,0")
 	  (const_int 1)))]
   "TARGET_SSE"
   "@
@@ -1635,6 +1709,23 @@
   [(set_attr "type" "ssecomi")
    (set_attr "mode" "DF")])
 
+;; APPLE LOCAL begin mainline April 14, 2005 Radar 4053179
+(define_expand "vcondv2df"
+  [(set (match_operand:V2DF 0 "register_operand" "")
+        (if_then_else:V2DF
+          (match_operator 3 ""
+            [(match_operand:V2DF 4 "nonimmediate_operand" "")
+             (match_operand:V2DF 5 "nonimmediate_operand" "")])
+          (match_operand:V2DF 1 "general_operand" "")
+          (match_operand:V2DF 2 "general_operand" "")))]
+  "TARGET_SSE2"
+{
+  if (ix86_expand_fp_vcond (operands))
+    DONE;
+  else
+    FAIL;
+})
+;; APPLE LOCAL end mainline April 14, 2005 Radar 4053179
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Parallel double-precision floating point logical operations
@@ -1652,7 +1743,8 @@
   [(set (match_operand:V2DF 0 "register_operand" "=x")
 	(and:V2DF (match_operand:V2DF 1 "nonimmediate_operand" "%0")
 		  (match_operand:V2DF 2 "nonimmediate_operand" "xm")))]
-  "TARGET_SSE2 && ix86_binary_operator_ok (AND, V4SFmode, operands)"
+;; APPLE LOCAL  mainline April 14, 2005 Radar 4053179
+  "TARGET_SSE2 && ix86_binary_operator_ok (AND, V2DFmode, operands)"
   "andpd\t{%2, %0|%0, %2}"
   [(set_attr "type" "sselog")
    (set_attr "mode" "V2DF")])
@@ -1698,6 +1790,48 @@
   [(set_attr "type" "sselog")
    (set_attr "mode" "V2DF")])
 
+;; APPLE LOCAL begin mainline April 14, 2005 Radar 4053179
+;; Also define scalar versions.  These are used for abs, neg, and
+;; conditional move.  Using subregs into vector modes causes regiser
+;; allocation lossage.  These patterns do not allow memory operands
+;; because the native instructions read the full 128-bits.
+
+(define_insn "*anddf3"
+  [(set (match_operand:DF 0 "register_operand" "=x")
+       (and:DF (match_operand:DF 1 "register_operand" "0")
+               (match_operand:DF 2 "register_operand" "x")))]
+  "TARGET_SSE2"
+  "andpd\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sselog")
+   (set_attr "mode" "V2DF")])
+
+(define_insn "*nanddf3"
+  [(set (match_operand:DF 0 "register_operand" "=x")
+       (and:DF (not:DF (match_operand:DF 1 "register_operand" "0"))
+               (match_operand:DF 2 "register_operand" "x")))]
+  "TARGET_SSE2"
+  "andnpd\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sselog")
+   (set_attr "mode" "V2DF")])
+
+(define_insn "*iordf3"
+  [(set (match_operand:DF 0 "register_operand" "=x")
+       (ior:DF (match_operand:DF 1 "register_operand" "0")
+               (match_operand:DF 2 "register_operand" "x")))]
+  "TARGET_SSE2"
+  "orpd\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sselog")
+   (set_attr "mode" "V2DF")])
+
+(define_insn "*xordf3"
+  [(set (match_operand:DF 0 "register_operand" "=x")
+       (xor:DF (match_operand:DF 1 "register_operand" "0")
+               (match_operand:DF 2 "register_operand" "x")))]
+  "TARGET_SSE2"
+  "xorpd\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sselog")
+   (set_attr "mode" "V2DF")])
+;; APPLE LOCAL end mainline April 14, 2005 Radar 4053179
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Parallel double-precision floating point conversion operations
@@ -2103,7 +2237,8 @@
 	(vec_concat:V2DF
 	  (match_operand:DF 2 "nonimmediate_operand"    " m,m,x,0,0,x*fr")
 	  (vec_select:DF
-	    (match_operand:V2DF 1 "vector_move_operand" " C,0,0,x,o,0")
+            /* APPLE LOCAL mainline candidate 4283414 */
+	    (match_operand:V2DF 1 "nonimmediate_or_0_operand" " C,0,0,x,o,0")
 	    (parallel [(const_int 1)]))))]
   "TARGET_SSE2 && !(MEM_P (operands[1]) && MEM_P (operands[2]))"
   "@
@@ -2176,7 +2311,8 @@
   [(set (match_operand:V2DF 0 "register_operand"     "=Y,Y,Y,x,x")
 	(vec_concat:V2DF
 	  (match_operand:DF 1 "nonimmediate_operand" " 0,0,m,0,0")
-	  (match_operand:DF 2 "vector_move_operand"  " Y,m,C,x,m")))]
+          /* APPLE LOCAL mainline candidate 4283414 */
+	  (match_operand:DF 2 "nonimmediate_or_0_operand"  " Y,m,C,x,m")))]
   "TARGET_SSE"
   "@
    unpcklpd\t{%2, %0|%0, %2}
@@ -2548,6 +2684,39 @@
   [(set_attr "type" "ssecmp")
    (set_attr "mode" "TI")])
 
+;; APPLE LOCAL begin mainline April 14, 2005 Radar 4053179
+(define_expand "vcond<mode>"
+  [(set (match_operand:SSEMODE124 0 "register_operand" "")
+        (if_then_else:SSEMODE124
+          (match_operator 3 ""
+            [(match_operand:SSEMODE124 4 "nonimmediate_operand" "")
+             (match_operand:SSEMODE124 5 "nonimmediate_operand" "")])
+          (match_operand:SSEMODE124 1 "general_operand" "")
+          (match_operand:SSEMODE124 2 "general_operand" "")))]
+  "TARGET_SSE2"
+{
+  if (ix86_expand_int_vcond (operands, false))
+    DONE;
+  else
+    FAIL;
+})
+
+(define_expand "vcondu<mode>"
+  [(set (match_operand:SSEMODE12 0 "register_operand" "")
+        (if_then_else:SSEMODE12
+          (match_operator 3 ""
+            [(match_operand:SSEMODE12 4 "nonimmediate_operand" "")
+             (match_operand:SSEMODE12 5 "nonimmediate_operand" "")])
+          (match_operand:SSEMODE12 1 "general_operand" "")
+          (match_operand:SSEMODE12 2 "general_operand" "")))]
+  "TARGET_SSE2"
+{
+  if (ix86_expand_int_vcond (operands, true))
+    DONE;
+  else
+    FAIL;
+})
+;; APPLE LOCAL end mainline April 14, 2005 Radar 4053179
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Parallel integral logical operations
@@ -2965,7 +3134,8 @@
 	(vec_merge:V4SI
 	  (vec_duplicate:V4SI
 	    (match_operand:SI 2 "nonimmediate_operand" "mr,m,x"))
-	  (match_operand:V4SI 1 "vector_move_operand"  " C,C,0")
+          /* APPLE LOCAL mainline candidate 4283414 */
+	  (match_operand:V4SI 1 "nonimmediate_or_0_operand"  " C,C,0")
 	  (const_int 1)))]
   "TARGET_SSE"
   "@
@@ -3089,7 +3259,8 @@
   [(set (match_operand:V2DI 0 "register_operand"     "=Y,?Y,Y,x,x,x")
 	(vec_concat:V2DI
 	  (match_operand:DI 1 "nonimmediate_operand" " m,*y,0,0,0,m")
-	  (match_operand:DI 2 "vector_move_operand"  " C, C,Y,x,m,0")))]
+          /* APPLE LOCAL mainline candidate 4283414 */
+	  (match_operand:DI 2 "nonimmediate_or_0_operand"  " C, C,Y,x,m,0")))]
   "TARGET_SSE"
   "@
    movq\t{%1, %0|%0, %1}
@@ -3438,3 +3609,579 @@
   "TARGET_SSE3"
   "monitor\t%0, %1, %2"
   [(set_attr "length" "3")])
+; APPLE LOCAL begin mni 4424835
+;; MNI
+(define_insn "mni_phaddwv8hi3"
+  [(set (match_operand:V8HI 0 "register_operand" "=x")
+	(vec_concat:V8HI
+	  (vec_concat:V4HI
+	    (vec_concat:V2HI
+	      (plus:HI
+		(vec_select:HI
+		  (match_operand:V8HI 1 "register_operand" "0")
+		  (parallel [(const_int 0)]))
+		(vec_select:HI (match_dup 1) (parallel [(const_int 1)])))
+	      (plus:HI
+		(vec_select:HI (match_dup 1) (parallel [(const_int 2)]))
+		(vec_select:HI (match_dup 1) (parallel [(const_int 3)]))))
+	    (vec_concat:V2HI
+	      (plus:HI
+		(vec_select:HI (match_dup 1) (parallel [(const_int 4)]))
+		(vec_select:HI (match_dup 1) (parallel [(const_int 5)])))
+	      (plus:HI
+		(vec_select:HI (match_dup 1) (parallel [(const_int 6)]))
+		(vec_select:HI (match_dup 1) (parallel [(const_int 7)])))))
+	  (vec_concat:V4HI
+	    (vec_concat:V2HI
+	      (plus:HI
+		(vec_select:HI
+		  (match_operand:V8HI 2 "nonimmediate_operand" "xm")
+		  (parallel [(const_int 0)]))
+		(vec_select:HI (match_dup 2) (parallel [(const_int 1)])))
+	      (plus:HI
+		(vec_select:HI (match_dup 2) (parallel [(const_int 2)]))
+		(vec_select:HI (match_dup 2) (parallel [(const_int 3)]))))
+	    (vec_concat:V2HI
+	      (plus:HI
+		(vec_select:HI (match_dup 2) (parallel [(const_int 4)]))
+		(vec_select:HI (match_dup 2) (parallel [(const_int 5)])))
+	      (plus:HI
+		(vec_select:HI (match_dup 2) (parallel [(const_int 6)]))
+		(vec_select:HI (match_dup 2) (parallel [(const_int 7)])))))))]
+  "TARGET_MNI"
+  "phaddw\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sseiadd")
+   (set_attr "mode" "TI")])
+
+(define_insn "mni_phaddwv4hi3"
+  [(set (match_operand:V4HI 0 "register_operand" "=y")
+	(vec_concat:V4HI
+	  (vec_concat:V2HI
+	    (plus:HI
+	      (vec_select:HI
+		(match_operand:V4HI 1 "register_operand" "0")
+		(parallel [(const_int 0)]))
+	      (vec_select:HI (match_dup 1) (parallel [(const_int 1)])))
+	    (plus:HI
+	      (vec_select:HI (match_dup 1) (parallel [(const_int 2)]))
+	      (vec_select:HI (match_dup 1) (parallel [(const_int 3)]))))
+	  (vec_concat:V2HI
+	    (plus:HI
+	      (vec_select:HI
+		(match_operand:V4HI 2 "nonimmediate_operand" "ym")
+		(parallel [(const_int 0)]))
+	      (vec_select:HI (match_dup 2) (parallel [(const_int 1)])))
+	    (plus:HI
+	      (vec_select:HI (match_dup 2) (parallel [(const_int 2)]))
+	      (vec_select:HI (match_dup 2) (parallel [(const_int 3)]))))))]
+  "TARGET_MNI"
+  "phaddw\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sseiadd")
+   (set_attr "mode" "DI")])
+
+(define_insn "mni_phadddv4si3"
+  [(set (match_operand:V4SI 0 "register_operand" "=x")
+	(vec_concat:V4SI
+	  (vec_concat:V2SI
+	    (plus:SI
+	      (vec_select:SI
+		(match_operand:V4SI 1 "register_operand" "0")
+		(parallel [(const_int 0)]))
+	      (vec_select:SI (match_dup 1) (parallel [(const_int 1)])))
+	    (plus:SI
+	      (vec_select:SI (match_dup 1) (parallel [(const_int 2)]))
+	      (vec_select:SI (match_dup 1) (parallel [(const_int 3)]))))
+	  (vec_concat:V2SI
+	    (plus:SI
+	      (vec_select:SI
+		(match_operand:V4SI 2 "nonimmediate_operand" "xm")
+		(parallel [(const_int 0)]))
+	      (vec_select:SI (match_dup 2) (parallel [(const_int 1)])))
+	    (plus:SI
+	      (vec_select:SI (match_dup 2) (parallel [(const_int 2)]))
+	      (vec_select:SI (match_dup 2) (parallel [(const_int 3)]))))))]
+  "TARGET_MNI"
+  "phaddd\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sseiadd")
+   (set_attr "mode" "TI")])
+
+(define_insn "mni_phadddv2si3"
+  [(set (match_operand:V2SI 0 "register_operand" "=y")
+	(vec_concat:V2SI
+	  (plus:SI
+	    (vec_select:SI
+	      (match_operand:V2SI 1 "register_operand" "0")
+	      (parallel [(const_int 0)]))
+	    (vec_select:SI (match_dup 1) (parallel [(const_int 1)])))
+	  (plus:SI
+	    (vec_select:SI
+	      (match_operand:V2SI 2 "nonimmediate_operand" "ym")
+	      (parallel [(const_int 0)]))
+	    (vec_select:SI (match_dup 2) (parallel [(const_int 1)])))))]
+  "TARGET_MNI"
+  "phaddd\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sseiadd")
+   (set_attr "mode" "DI")])
+
+(define_insn "mni_phaddswv8hi3"
+  [(set (match_operand:V8HI 0 "register_operand" "=x")
+	(vec_concat:V8HI
+	  (vec_concat:V4HI
+	    (vec_concat:V2HI
+	      (ss_plus:HI
+		(vec_select:HI
+		  (match_operand:V8HI 1 "register_operand" "0")
+		  (parallel [(const_int 0)]))
+		(vec_select:HI (match_dup 1) (parallel [(const_int 1)])))
+	      (ss_plus:HI
+		(vec_select:HI (match_dup 1) (parallel [(const_int 2)]))
+		(vec_select:HI (match_dup 1) (parallel [(const_int 3)]))))
+	    (vec_concat:V2HI
+	      (ss_plus:HI
+		(vec_select:HI (match_dup 1) (parallel [(const_int 4)]))
+		(vec_select:HI (match_dup 1) (parallel [(const_int 5)])))
+	      (ss_plus:HI
+		(vec_select:HI (match_dup 1) (parallel [(const_int 6)]))
+		(vec_select:HI (match_dup 1) (parallel [(const_int 7)])))))
+	  (vec_concat:V4HI
+	    (vec_concat:V2HI
+	      (ss_plus:HI
+		(vec_select:HI
+		  (match_operand:V8HI 2 "nonimmediate_operand" "xm")
+		  (parallel [(const_int 0)]))
+		(vec_select:HI (match_dup 2) (parallel [(const_int 1)])))
+	      (ss_plus:HI
+		(vec_select:HI (match_dup 2) (parallel [(const_int 2)]))
+		(vec_select:HI (match_dup 2) (parallel [(const_int 3)]))))
+	    (vec_concat:V2HI
+	      (ss_plus:HI
+		(vec_select:HI (match_dup 2) (parallel [(const_int 4)]))
+		(vec_select:HI (match_dup 2) (parallel [(const_int 5)])))
+	      (ss_plus:HI
+		(vec_select:HI (match_dup 2) (parallel [(const_int 6)]))
+		(vec_select:HI (match_dup 2) (parallel [(const_int 7)])))))))]
+  "TARGET_MNI"
+  "phaddsw\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sseiadd")
+   (set_attr "mode" "TI")])
+
+(define_insn "mni_phaddswv4hi3"
+  [(set (match_operand:V4HI 0 "register_operand" "=y")
+	(vec_concat:V4HI
+	  (vec_concat:V2HI
+	    (ss_plus:HI
+	      (vec_select:HI
+		(match_operand:V4HI 1 "register_operand" "0")
+		(parallel [(const_int 0)]))
+	      (vec_select:HI (match_dup 1) (parallel [(const_int 1)])))
+	    (ss_plus:HI
+	      (vec_select:HI (match_dup 1) (parallel [(const_int 2)]))
+	      (vec_select:HI (match_dup 1) (parallel [(const_int 3)]))))
+	  (vec_concat:V2HI
+	    (ss_plus:HI
+	      (vec_select:HI
+		(match_operand:V4HI 2 "nonimmediate_operand" "ym")
+		(parallel [(const_int 0)]))
+	      (vec_select:HI (match_dup 2) (parallel [(const_int 1)])))
+	    (ss_plus:HI
+	      (vec_select:HI (match_dup 2) (parallel [(const_int 2)]))
+	      (vec_select:HI (match_dup 2) (parallel [(const_int 3)]))))))]
+  "TARGET_MNI"
+  "phaddsw\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sseiadd")
+   (set_attr "mode" "DI")])
+
+(define_insn "mni_phsubwv8hi3"
+  [(set (match_operand:V8HI 0 "register_operand" "=x")
+	(vec_concat:V8HI
+	  (vec_concat:V4HI
+	    (vec_concat:V2HI
+	      (minus:HI
+		(vec_select:HI
+		  (match_operand:V8HI 1 "register_operand" "0")
+		  (parallel [(const_int 0)]))
+		(vec_select:HI (match_dup 1) (parallel [(const_int 1)])))
+	      (minus:HI
+		(vec_select:HI (match_dup 1) (parallel [(const_int 2)]))
+		(vec_select:HI (match_dup 1) (parallel [(const_int 3)]))))
+	    (vec_concat:V2HI
+	      (minus:HI
+		(vec_select:HI (match_dup 1) (parallel [(const_int 4)]))
+		(vec_select:HI (match_dup 1) (parallel [(const_int 5)])))
+	      (minus:HI
+		(vec_select:HI (match_dup 1) (parallel [(const_int 6)]))
+		(vec_select:HI (match_dup 1) (parallel [(const_int 7)])))))
+	  (vec_concat:V4HI
+	    (vec_concat:V2HI
+	      (minus:HI
+		(vec_select:HI
+		  (match_operand:V8HI 2 "nonimmediate_operand" "xm")
+		  (parallel [(const_int 0)]))
+		(vec_select:HI (match_dup 2) (parallel [(const_int 1)])))
+	      (minus:HI
+		(vec_select:HI (match_dup 2) (parallel [(const_int 2)]))
+		(vec_select:HI (match_dup 2) (parallel [(const_int 3)]))))
+	    (vec_concat:V2HI
+	      (minus:HI
+		(vec_select:HI (match_dup 2) (parallel [(const_int 4)]))
+		(vec_select:HI (match_dup 2) (parallel [(const_int 5)])))
+	      (minus:HI
+		(vec_select:HI (match_dup 2) (parallel [(const_int 6)]))
+		(vec_select:HI (match_dup 2) (parallel [(const_int 7)])))))))]
+  "TARGET_MNI"
+  "phsubw\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sseiadd")
+   (set_attr "mode" "TI")])
+
+(define_insn "mni_phsubwv4hi3"
+  [(set (match_operand:V4HI 0 "register_operand" "=y")
+	(vec_concat:V4HI
+	  (vec_concat:V2HI
+	    (minus:HI
+	      (vec_select:HI
+		(match_operand:V4HI 1 "register_operand" "0")
+		(parallel [(const_int 0)]))
+	      (vec_select:HI (match_dup 1) (parallel [(const_int 1)])))
+	    (minus:HI
+	      (vec_select:HI (match_dup 1) (parallel [(const_int 2)]))
+	      (vec_select:HI (match_dup 1) (parallel [(const_int 3)]))))
+	  (vec_concat:V2HI
+	    (minus:HI
+	      (vec_select:HI
+		(match_operand:V4HI 2 "nonimmediate_operand" "ym")
+		(parallel [(const_int 0)]))
+	      (vec_select:HI (match_dup 2) (parallel [(const_int 1)])))
+	    (minus:HI
+	      (vec_select:HI (match_dup 2) (parallel [(const_int 2)]))
+	      (vec_select:HI (match_dup 2) (parallel [(const_int 3)]))))))]
+  "TARGET_MNI"
+  "phsubw\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sseiadd")
+   (set_attr "mode" "DI")])
+
+(define_insn "mni_phsubdv4si3"
+  [(set (match_operand:V4SI 0 "register_operand" "=x")
+	(vec_concat:V4SI
+	  (vec_concat:V2SI
+	    (minus:SI
+	      (vec_select:SI
+		(match_operand:V4SI 1 "register_operand" "0")
+		(parallel [(const_int 0)]))
+	      (vec_select:SI (match_dup 1) (parallel [(const_int 1)])))
+	    (minus:SI
+	      (vec_select:SI (match_dup 1) (parallel [(const_int 2)]))
+	      (vec_select:SI (match_dup 1) (parallel [(const_int 3)]))))
+	  (vec_concat:V2SI
+	    (minus:SI
+	      (vec_select:SI
+		(match_operand:V4SI 2 "nonimmediate_operand" "xm")
+		(parallel [(const_int 0)]))
+	      (vec_select:SI (match_dup 2) (parallel [(const_int 1)])))
+	    (minus:SI
+	      (vec_select:SI (match_dup 2) (parallel [(const_int 2)]))
+	      (vec_select:SI (match_dup 2) (parallel [(const_int 3)]))))))]
+  "TARGET_MNI"
+  "phsubd\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sseiadd")
+   (set_attr "mode" "TI")])
+
+(define_insn "mni_phsubdv2si3"
+  [(set (match_operand:V2SI 0 "register_operand" "=y")
+	(vec_concat:V2SI
+	  (minus:SI
+	    (vec_select:SI
+	      (match_operand:V2SI 1 "register_operand" "0")
+	      (parallel [(const_int 0)]))
+	    (vec_select:SI (match_dup 1) (parallel [(const_int 1)])))
+	  (minus:SI
+	    (vec_select:SI
+	      (match_operand:V2SI 2 "nonimmediate_operand" "ym")
+	      (parallel [(const_int 0)]))
+	    (vec_select:SI (match_dup 2) (parallel [(const_int 1)])))))]
+  "TARGET_MNI"
+  "phsubd\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sseiadd")
+   (set_attr "mode" "DI")])
+
+(define_insn "mni_phsubswv8hi3"
+  [(set (match_operand:V8HI 0 "register_operand" "=x")
+	(vec_concat:V8HI
+	  (vec_concat:V4HI
+	    (vec_concat:V2HI
+	      (ss_minus:HI
+		(vec_select:HI
+		  (match_operand:V8HI 1 "register_operand" "0")
+		  (parallel [(const_int 0)]))
+		(vec_select:HI (match_dup 1) (parallel [(const_int 1)])))
+	      (ss_minus:HI
+		(vec_select:HI (match_dup 1) (parallel [(const_int 2)]))
+		(vec_select:HI (match_dup 1) (parallel [(const_int 3)]))))
+	    (vec_concat:V2HI
+	      (ss_minus:HI
+		(vec_select:HI (match_dup 1) (parallel [(const_int 4)]))
+		(vec_select:HI (match_dup 1) (parallel [(const_int 5)])))
+	      (ss_minus:HI
+		(vec_select:HI (match_dup 1) (parallel [(const_int 6)]))
+		(vec_select:HI (match_dup 1) (parallel [(const_int 7)])))))
+	  (vec_concat:V4HI
+	    (vec_concat:V2HI
+	      (ss_minus:HI
+		(vec_select:HI
+		  (match_operand:V8HI 2 "nonimmediate_operand" "xm")
+		  (parallel [(const_int 0)]))
+		(vec_select:HI (match_dup 2) (parallel [(const_int 1)])))
+	      (ss_minus:HI
+		(vec_select:HI (match_dup 2) (parallel [(const_int 2)]))
+		(vec_select:HI (match_dup 2) (parallel [(const_int 3)]))))
+	    (vec_concat:V2HI
+	      (ss_minus:HI
+		(vec_select:HI (match_dup 2) (parallel [(const_int 4)]))
+		(vec_select:HI (match_dup 2) (parallel [(const_int 5)])))
+	      (ss_minus:HI
+		(vec_select:HI (match_dup 2) (parallel [(const_int 6)]))
+		(vec_select:HI (match_dup 2) (parallel [(const_int 7)])))))))]
+  "TARGET_MNI"
+  "phsubsw\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sseiadd")
+   (set_attr "mode" "TI")])
+
+(define_insn "mni_phsubswv4hi3"
+  [(set (match_operand:V4HI 0 "register_operand" "=y")
+	(vec_concat:V4HI
+	  (vec_concat:V2HI
+	    (ss_minus:HI
+	      (vec_select:HI
+		(match_operand:V4HI 1 "register_operand" "0")
+		(parallel [(const_int 0)]))
+	      (vec_select:HI (match_dup 1) (parallel [(const_int 1)])))
+	    (ss_minus:HI
+	      (vec_select:HI (match_dup 1) (parallel [(const_int 2)]))
+	      (vec_select:HI (match_dup 1) (parallel [(const_int 3)]))))
+	  (vec_concat:V2HI
+	    (ss_minus:HI
+	      (vec_select:HI
+		(match_operand:V4HI 2 "nonimmediate_operand" "ym")
+		(parallel [(const_int 0)]))
+	      (vec_select:HI (match_dup 2) (parallel [(const_int 1)])))
+	    (ss_minus:HI
+	      (vec_select:HI (match_dup 2) (parallel [(const_int 2)]))
+	      (vec_select:HI (match_dup 2) (parallel [(const_int 3)]))))))]
+  "TARGET_MNI"
+  "phsubsw\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sseiadd")
+   (set_attr "mode" "DI")])
+
+(define_insn "mni_pmaddubswv8hi3"
+  [(set (match_operand:V8HI 0 "register_operand" "=x")
+	(ss_plus:V8HI
+	  (mult:V8HI
+	    (zero_extend:V8HI
+	      (vec_select:V4QI
+		(match_operand:V16QI 1 "nonimmediate_operand" "%0")
+		(parallel [(const_int 0)
+			   (const_int 2)
+			   (const_int 4)
+			   (const_int 6)
+			   (const_int 8)
+			   (const_int 10)
+			   (const_int 12)
+			   (const_int 14)])))
+	    (sign_extend:V8HI
+	      (vec_select:V8QI
+		(match_operand:V16QI 2 "nonimmediate_operand" "xm")
+		(parallel [(const_int 0)
+			   (const_int 2)
+			   (const_int 4)
+			   (const_int 6)
+			   (const_int 8)
+			   (const_int 10)
+			   (const_int 12)
+			   (const_int 14)]))))
+	  (mult:V8HI
+	    (zero_extend:V8HI
+	      (vec_select:V16QI (match_dup 1)
+		(parallel [(const_int 1)
+			   (const_int 3)
+			   (const_int 5)
+			   (const_int 7)
+			   (const_int 9)
+			   (const_int 11)
+			   (const_int 13)
+			   (const_int 15)])))
+	    (sign_extend:V8HI
+	      (vec_select:V16QI (match_dup 2)
+		(parallel [(const_int 1)
+			   (const_int 3)
+			   (const_int 5)
+			   (const_int 7)
+			   (const_int 9)
+			   (const_int 11)
+			   (const_int 13)
+			   (const_int 15)]))))))]
+  "TARGET_MNI"
+  "pmaddubsw\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sseiadd")
+   (set_attr "mode" "TI")])
+
+(define_insn "mni_pmaddubswv4hi3"
+  [(set (match_operand:V4HI 0 "register_operand" "=y")
+	(ss_plus:V4HI
+	  (mult:V4HI
+	    (zero_extend:V4HI
+	      (vec_select:V4QI
+		(match_operand:V8QI 1 "nonimmediate_operand" "%0")
+		(parallel [(const_int 0)
+			   (const_int 2)
+			   (const_int 4)
+			   (const_int 6)])))
+	    (sign_extend:V4HI
+	      (vec_select:V4QI
+		(match_operand:V8QI 2 "nonimmediate_operand" "ym")
+		(parallel [(const_int 0)
+			   (const_int 2)
+			   (const_int 4)
+			   (const_int 6)]))))
+	  (mult:V4HI
+	    (zero_extend:V4HI
+	      (vec_select:V8QI (match_dup 1)
+		(parallel [(const_int 1)
+			   (const_int 3)
+			   (const_int 5)
+			   (const_int 7)])))
+	    (sign_extend:V4HI
+	      (vec_select:V8QI (match_dup 2)
+		(parallel [(const_int 1)
+			   (const_int 3)
+			   (const_int 5)
+			   (const_int 7)]))))))]
+  "TARGET_MNI"
+  "pmaddubsw\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sseiadd")
+   (set_attr "mode" "DI")])
+
+(define_insn "mni_pmulhrswv8hi3"
+  [(set (match_operand:V8HI 0 "register_operand" "=x")
+	(truncate:V8HI
+	  (lshiftrt:V8SI
+	    (plus:V8SI
+	      (lshiftrt:V8SI
+		(mult:V8SI
+		  (sign_extend:V8SI
+		    (match_operand:V8HI 1 "nonimmediate_operand" "%0"))
+		  (sign_extend:V8SI
+		    (match_operand:V8HI 2 "nonimmediate_operand" "xm")))
+		(const_int 14))
+	      (const_vector:V8HI [(const_int 1) (const_int 1)
+				  (const_int 1) (const_int 1)
+				  (const_int 1) (const_int 1)
+				  (const_int 1) (const_int 1)]))
+	    (const_int 1))))]
+  "TARGET_MNI && ix86_binary_operator_ok (MULT, V8HImode, operands)"
+  "pmulhrsw\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sseimul")
+   (set_attr "mode" "TI")])
+
+(define_insn "mni_pmulhrswv4hi3"
+  [(set (match_operand:V4HI 0 "register_operand" "=y")
+	(truncate:V4HI
+	  (lshiftrt:V4SI
+	    (plus:V4SI
+	      (lshiftrt:V4SI
+		(mult:V4SI
+		  (sign_extend:V4SI
+		    (match_operand:V4HI 1 "nonimmediate_operand" "%0"))
+		  (sign_extend:V4SI
+		    (match_operand:V4HI 2 "nonimmediate_operand" "ym")))
+		(const_int 14))
+	      (const_vector:V4HI [(const_int 1) (const_int 1)
+				  (const_int 1) (const_int 1)]))
+	    (const_int 1))))]
+  "TARGET_MNI && ix86_binary_operator_ok (MULT, V4HImode, operands)"
+  "pmulhrsw\t{%2, %0|%0, %2}"
+  [(set_attr "type" "sseimul")
+   (set_attr "mode" "DI")])
+
+(define_insn "mni_pshufbv16qi3"
+  [(set (match_operand:V16QI 0 "register_operand" "=x")
+	(unspec:V16QI [(match_operand:V16QI 1 "register_operand" "0")
+		       (match_operand:V16QI 2 "nonimmediate_operand" "xm")]
+		       UNSPEC_PSHUFB))]
+  "TARGET_MNI"
+  "pshufb\t{%2, %0|%0, %2}";
+  [(set_attr "type" "sselog1")
+   (set_attr "mode" "TI")])
+
+(define_insn "mni_pshufbv8qi3"
+  [(set (match_operand:V8QI 0 "register_operand" "=y")
+	(unspec:V8QI [(match_operand:V8QI 1 "register_operand" "0")
+		      (match_operand:V8QI 2 "nonimmediate_operand" "ym")]
+		      UNSPEC_PSHUFB))]
+  "TARGET_MNI"
+  "pshufb\t{%2, %0|%0, %2}";
+  [(set_attr "type" "sselog1")
+   (set_attr "mode" "DI")])
+
+(define_insn "mni_psign<mode>3"
+  [(set (match_operand:SSEMODE124 0 "register_operand" "=x")
+	(unspec:SSEMODE124 [(match_operand:SSEMODE124 1 "register_operand" "0")
+			    (match_operand:SSEMODE124 2 "nonimmediate_operand" "xm")]
+			    UNSPEC_PSIGN))]
+  "TARGET_MNI"
+  "psign<ssevecsize>\t{%2, %0|%0, %2}";
+  [(set_attr "type" "sselog1")
+   (set_attr "mode" "TI")])
+
+(define_insn "mni_psign<mode>3"
+  [(set (match_operand:MMXMODEI 0 "register_operand" "=y")
+	(unspec:MMXMODEI [(match_operand:MMXMODEI 1 "register_operand" "0")
+			  (match_operand:MMXMODEI 2 "nonimmediate_operand" "ym")]
+			  UNSPEC_PSIGN))]
+  "TARGET_MNI"
+  "psign<mmxvecsize>\t{%2, %0|%0, %2}";
+  [(set_attr "type" "sselog1")
+   (set_attr "mode" "DI")])
+
+(define_insn "mni_palignrti"
+  [(set (match_operand:TI 0 "register_operand" "=x")
+	(unspec:TI [(match_operand:TI 1 "register_operand" "0")
+		    (match_operand:TI 2 "nonimmediate_operand" "xm")
+		    (match_operand:SI 3 "const_0_to_255_mul_8_operand" "n")]
+		    UNSPEC_PALIGNR))]
+  "TARGET_MNI"
+{
+  operands[3] = GEN_INT (INTVAL (operands[3]) / 8);
+  return "palignr\t{%3, %2, %0|%0, %2, %3}";
+}
+  [(set_attr "type" "sseishft")
+   (set_attr "mode" "TI")])
+
+(define_insn "mni_palignrdi"
+  [(set (match_operand:DI 0 "register_operand" "=y")
+	(unspec:DI [(match_operand:DI 1 "register_operand" "0")
+		    (match_operand:DI 2 "nonimmediate_operand" "ym")
+		    (match_operand:SI 3 "const_0_to_255_mul_8_operand" "n")]
+		    UNSPEC_PALIGNR))]
+  "TARGET_MNI"
+{
+  operands[3] = GEN_INT (INTVAL (operands[3]) / 8);
+  return "palignr\t{%3, %2, %0|%0, %2, %3}";
+}
+  [(set_attr "type" "sseishft")
+   (set_attr "mode" "DI")])
+
+(define_insn "mni_pabs<mode>2"
+  [(set (match_operand:SSEMODE124 0 "register_operand" "=x")
+	(abs:SSEMODE124 (match_operand:SSEMODE124 1 "nonimmediate_operand" "xm")))]
+  "TARGET_MNI"
+  "pabs<ssevecsize>\t{%1, %0|%0, %1}";
+  [(set_attr "type" "sselog1")
+   (set_attr "mode" "TI")])
+
+(define_insn "mni_pabs<mode>2"
+  [(set (match_operand:MMXMODEI 0 "register_operand" "=y")
+	(abs:MMXMODEI (match_operand:MMXMODEI 1 "nonimmediate_operand" "ym")))]
+  "TARGET_MNI"
+  "pabs<mmxvecsize>\t{%1, %0|%0, %1}";
+  [(set_attr "type" "sselog1")
+   (set_attr "mode" "DI")])
+; APPLE LOCAL end mni

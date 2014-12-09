@@ -48,6 +48,11 @@ Boston, MA 02111-1307, USA.  */
 
 static bool using_frameworks = false;
 
+/* APPLE LOCAL begin mainline */
+/* True if we're setting __attribute__ ((ms_struct)).  */
+static bool darwin_ms_struct = false;
+
+/* APPLE LOCAL end mainline */
 /* APPLE LOCAL begin CALL_ON_LOAD/CALL_ON_UNLOAD pragmas  20020202 --turly  */
 static void directive_with_named_function (const char *, void (*sec_f)(void));
 /* APPLE LOCAL end CALL_ON_LOAD/CALL_ON_UNLOAD pragmas  20020202 --turly  */
@@ -336,7 +341,8 @@ darwin_pragma_unused (cpp_reader *pfile ATTRIBUTE_UNUSED)
       tok = c_lex (&decl);
       if (tok == CPP_NAME && decl)
 	{
-	  tree local = lookup_name (decl);
+	  /* APPLE LOCAL mainline lookup_name 4125055 */
+	  tree local = lookup_name_two (decl, 0);
 	  if (local && (TREE_CODE (local) == PARM_DECL
 			|| TREE_CODE (local) == VAR_DECL))
 	    TREE_USED (local) = 1;
@@ -353,6 +359,41 @@ darwin_pragma_unused (cpp_reader *pfile ATTRIBUTE_UNUSED)
     warning ("junk at end of '#pragma unused'");
 }
 
+/* APPLE LOCAL begin mainline */
+/* Parse the ms_struct pragma.  */
+void
+darwin_pragma_ms_struct (cpp_reader *pfile ATTRIBUTE_UNUSED)
+{
+  const char *arg;
+  tree t;
+
+  if (c_lex (&t) != CPP_NAME)
+    BAD ("malformed '#pragma ms_struct', ignoring");
+  arg = IDENTIFIER_POINTER (t);
+
+  if (!strcmp (arg, "on"))
+    darwin_ms_struct = true;
+  else if (!strcmp (arg, "off") || !strcmp (arg, "reset"))
+    darwin_ms_struct = false;
+  else
+    warning ("malformed '#pragma ms_struct {on|off|reset}', ignoring");
+
+  if (c_lex (&t) != CPP_EOF)
+    warning ("junk at end of '#pragma ms_struct'");
+}
+
+/* Set darwin specific type attributes on TYPE.  */
+void
+darwin_set_default_type_attributes (tree type)
+{
+  /* Handle the ms_struct pragma.  */
+  if (darwin_ms_struct
+      && TREE_CODE (type) == RECORD_TYPE)
+    TYPE_ATTRIBUTES (type) = tree_cons (get_identifier ("ms_struct"),
+                                        NULL_TREE,
+                                        TYPE_ATTRIBUTES (type));
+}
+/* APPLE LOCAL end mainline */
 /* APPLE LOCAL begin pragma reverse_bitfields */
 /* Handle the reverse_bitfields pragma.  */
 
@@ -897,14 +938,24 @@ static void directive_with_named_function (const char *pragma_name,
 void
 darwin_pragma_call_on_load (cpp_reader *pfile ATTRIBUTE_UNUSED)
 {
-  warning("Pragma CALL_ON_LOAD is deprecated; use constructor attribute instead");
-  directive_with_named_function ("CALL_ON_LOAD", mod_init_section);
+  if (TARGET_64BIT)
+    error ("Pragma CALL_ON_LOAD unsupported for 64-bit target; use constructor attribute instead");
+  else
+    {
+      warning ("Pragma CALL_ON_LOAD is deprecated; use constructor attribute instead");
+      directive_with_named_function ("CALL_ON_LOAD", mod_init_section);
+    }
 }
 void
 darwin_pragma_call_on_unload (cpp_reader *pfile ATTRIBUTE_UNUSED)
 {
-  warning("Pragma CALL_ON_UNLOAD is deprecated; use destructor attribute instead");
-  directive_with_named_function ("CALL_ON_UNLOAD", mod_term_section);
+  if (TARGET_64BIT)
+    error ("Pragma CALL_ON_UNLOAD unsupported for 64-bit target; use destructor attribute instead");
+  else
+    {
+      warning("Pragma CALL_ON_UNLOAD is deprecated; use destructor attribute instead");
+      directive_with_named_function ("CALL_ON_UNLOAD", mod_term_section);
+    }
 }
 /* APPLE LOCAL end CALL_ON_LOAD/CALL_ON_UNLOAD pragmas  20020202 --turly  */
 /* APPLE LOCAL begin mainline 2005-09-01 3449986 */

@@ -1039,13 +1039,15 @@ AM_LANGINFO_CODESET
 # We will need to find libiberty.h and ansidecl.h
 saved_CFLAGS="$CFLAGS"
 CFLAGS="$CFLAGS -I${srcdir} -I${srcdir}/../include"
-gcc_AC_CHECK_DECLS(getenv atol sbrk abort atof getcwd getwd strsignal \
+# APPLE LOCAL begin mainline llvm
+gcc_AC_CHECK_DECLS(getenv atol asprintf sbrk abort atof getcwd getwd strsignal \
 dnl APPLE LOCAL mainline 2005-09-01 3449986
 	strverscmp \
 	strstr errno snprintf vasprintf malloc realloc calloc free \
 	basename getopt clock getpagesize gcc_UNLOCKED_FUNCS, , ,[
 #include "ansidecl.h"
 #include "system.h"])
+# APPLE LOCAL end mainline llvm
 
 gcc_AC_CHECK_DECLS(getrlimit setrlimit getrusage, , ,[
 #include "ansidecl.h"
@@ -1324,7 +1326,8 @@ if test x$enable___cxa_atexit = xyes || \
     use_cxa_atexit=yes
   fi
   if test x$use_cxa_atexit = xyes; then
-    AC_DEFINE(DEFAULT_USE_CXA_ATEXIT, 1,
+dnl APPLE LOCAL mainline 2006-02-24 4086777
+    AC_DEFINE(DEFAULT_USE_CXA_ATEXIT, 2,
       [Define if you want to use __cxa_atexit, rather than atexit, to
       register C++ destructors for local statics and global objects.
       This is essential for fully standards-compliant handling of
@@ -2036,6 +2039,14 @@ gcc_GAS_CHECK_FEATURE([.p2align with maximum skip], gcc_cv_as_max_skip_p2align,
 [AC_DEFINE(HAVE_GAS_MAX_SKIP_P2ALIGN, 1,
   [Define if your assembler supports specifying the maximum number
    of bytes to skip when using the GAS .p2align command.])])
+
+# APPLE LOCAL begin x86_64 literal16
+gcc_GAS_CHECK_FEATURE([.literal16], gcc_cv_as_literal16,
+ [2,8,0],,
+ [.literal16],,
+[AC_DEFINE(HAVE_GAS_LITERAL16, 1,
+  [Define if your assembler supports .literal16.])])
+# APPLE LOCAL end x86_64 literal16
 
 gcc_GAS_CHECK_FEATURE([working .subsection -1], gcc_cv_as_subsection_m1,
  [elf,2,9,0],,
