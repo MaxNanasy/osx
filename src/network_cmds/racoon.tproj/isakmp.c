@@ -546,7 +546,7 @@ isakmp_main(msg, remote, local)
 		if (cmpsaddrstrict(iph1->remote, remote) != 0) {
 #ifdef IKE_NAT_T
 			if (iph1->side == RESPONDER &&
-				(iph1->natt_flags & natt_remote_support) != 0 &&
+				(iph1->natt_flags & NATT_TYPE_MASK) != 0 &&
 				cmpsaddrwop(iph1->remote, remote) == 0)
 			{
 				/*
@@ -1357,7 +1357,7 @@ isakmp_parsewoh(np0, gen, len)
 
 		p->type = np;
 		p->len = ntohs(gen->len);
-		if (p->len == 0 || p->len > tlen) {
+		if (p->len < sizeof(struct isakmp_gen) || p->len > tlen) {
 			plog(LLV_DEBUG, LOCATION, NULL,
 				"invalid length of payload\n");
 			vfree(result);
