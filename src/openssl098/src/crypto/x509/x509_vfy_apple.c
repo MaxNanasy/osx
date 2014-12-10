@@ -27,14 +27,18 @@
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 #include <TrustEvaluationAgent/TrustEvaluationAgent.h>
+#include <syslog.h>
 
 #include "cryptlib.h"
 #include "x509_vfy_apple.h"
 
+#define TEA_might_correct_error(err) (err == X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT_LOCALLY || err == X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT || err == X509_V_ERR_SELF_SIGNED_CERT_IN_CHAIN)
+
 /*
  * Please see comment in x509_vfy_apple.h
  */
-int X509_verify_cert(X509_STORE_CTX *ctx)
+int
+X509_verify_cert(X509_STORE_CTX *ctx)
 {
 	TEAResult		ret = kTEAResultCertNotTrusted;
 	TEACertificateChainRef	inputChain = NULL;
@@ -51,7 +55,10 @@ int X509_verify_cert(X509_STORE_CTX *ctx)
 
 	/* Try OpenSSL, if we get a local certificate issue verify against trusted roots */
 	ret = X509_verify_cert_orig(ctx);
-	if (ret != 1 && (ctx->error & X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT_LOCALLY)) {
+
+	/* Verify TEA is enabled and should be used. */
+	if (0 != X509_TEA_is_enabled() &&
+		ret != 1 && TEA_might_correct_error(ctx->error)) {
 
 		/* Verify that the certificate chain exists, otherwise make it. */
 		if (ctx->chain == NULL && (ctx->chain = sk_X509_new_null()) == NULL) {
@@ -73,7 +80,11 @@ int X509_verify_cert(X509_STORE_CTX *ctx)
 			goto bail;
 		}
 
-		error = TEACertificateChainAddCert(inputChain, ctx->cert, i2d_X509(ctx->cert, NULL));
+		unsigned char *asn1_cert_data = NULL;
+		int asn1_cert_len = i2d_X509(ctx->cert, &asn1_cert_data);
+		error = TEACertificateChainAddCert(inputChain, asn1_cert_data, asn1_cert_len);
+		// TEACertificateChainAddCert made a copy of the ASN.1 data, so we get to free ours here
+		OPENSSL_free(asn1_cert_data);
 		if (error) {
 			TEALogDebug("An error occured while inserting the certificate into the chain");
 			goto bail;
@@ -82,18 +93,18 @@ int X509_verify_cert(X509_STORE_CTX *ctx)
 		for (i = 0; i < certLastIndex; ++i) {
 			X509	*t = sk_X509_value(ctx->untrusted, i);
 
-			error = TEACertificateChainAddCert(inputChain, t, i2d_X509(t, NULL));
+			asn1_cert_data = NULL;
+			asn1_cert_len = i2d_X509(t, &asn1_cert_data);
+			error = TEACertificateChainAddCert(inputChain, asn1_cert_data, asn1_cert_len);
+			// TEACertificateChainAddCert made a copy of the ASN.1 data, so we get to free ours here
+			OPENSSL_free(asn1_cert_data);
 			if (error) {
 				TEALogDebug("An error occured while inserting an untrusted certificate into the chain");
 				goto bail;
 			}
 		}
 
-		TEACertificateChainSetEncodingHandler(inputChain, ^(uint8_t *dstBuffer, const TEACertificateRef cert) {
-			if (i2d_X509((void *)TEACertificateGetData(cert), &dstBuffer) == 0)
-				return 1;
-			return 0;
-		});
+		// We put ASN.1 encoded X509 on the CertificateChain, so we don't call TEACertificateChainSetEncodingHandler
 		
 		params.purpose = ctx->param->purpose;
 		if (ctx->param->flags & X509_V_FLAG_USE_CHECK_TIME)
@@ -153,5 +164,36 @@ int X509_verify_cert(X509_STORE_CTX *ctx)
 	}
 
 bail:
+	if (inputChain) {
+		TEACertificateChainRelease(inputChain);
+		inputChain = NULL;
+	}
+	if (outputChain) {
+		TEACertificateChainRelease(outputChain);
+		outputChain = NULL;
+	}
 	return ret;
+}
+
+#pragma mark Trust Evaluation Agent
+
+/* -1: not set
+ *  0: set to false
+ *  1: set to true
+ */
+static int tea_enabled = -1;
+
+void
+X509_TEA_set_state(int change)
+{
+	tea_enabled = (change) ? 1 : 0;
+}
+
+int
+X509_TEA_is_enabled()
+{
+	if (tea_enabled < 0)
+		tea_enabled = (NULL == getenv(X509_TEA_ENV_DISABLE));
+
+	return tea_enabled != 0;
 }
