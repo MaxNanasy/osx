@@ -2,23 +2,22 @@
  * Copyright (c) 1999, 2008 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- *
- * "Portions Copyright (c) 1999, 2008 Apple Inc.  All Rights
- * Reserved.  This file contains Original Code and/or Modifications of
- * Original Code as defined in and that are subject to the Apple Public
- * Source License Version 1.0 (the 'License').  You may not use this file
- * except in compliance with the License.  Please obtain a copy of the
- * License at http://www.apple.com/publicsource and read it before using
- * this file.
- *
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License."
- *
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
  * @APPLE_LICENSE_HEADER_END@
  */
 /*
@@ -73,6 +72,37 @@ WriteIncludes(FILE *file, boolean_t isuser, boolean_t isdef)
     fprintf(file, "#include <mach/message.h>\n");
     fprintf(file, "#include <mach/mig_errors.h>\n");
     fprintf(file, "#include <mach/port.h>\n");
+
+    if (IsVoucherCodeAllowed && !IsKernelUser && !IsKernelServer) {
+      fprintf(file, "\t\n/* BEGIN VOUCHER CODE */\n\n");
+      fprintf(file, "#ifndef KERNEL\n");
+      fprintf(file, "#if defined(__has_include)\n");
+      fprintf(file, "#if __has_include(<mach/mig_voucher_support.h>)\n");
+      fprintf(file, "#ifndef USING_VOUCHERS\n");
+      fprintf(file, "#define USING_VOUCHERS\n");
+      fprintf(file, "#endif\n");
+
+
+      fprintf(file, "#ifndef __VOUCHER_FORWARD_TYPE_DECLS__\n");
+      fprintf(file, "#define __VOUCHER_FORWARD_TYPE_DECLS__\n");
+
+      fprintf(file, "#ifdef __cplusplus\n");
+      fprintf(file, "extern \"C\" {\n");
+      fprintf(file, "#endif\n");
+
+      fprintf(file, "\textern boolean_t voucher_mach_msg_set(mach_msg_header_t *msg) __attribute__((weak_import));\n");
+
+      fprintf(file, "#ifdef __cplusplus\n");
+      fprintf(file, "}\n");
+      fprintf(file, "#endif\n");
+
+      fprintf(file, "#endif // __VOUCHER_FORWARD_TYPE_DECLS__\n");
+      fprintf(file, "#endif // __has_include(<mach/mach_voucher_types.h>)\n");
+      fprintf(file, "#endif // __has_include\n");
+      fprintf(file, "#endif // !KERNEL\n");
+
+      fprintf(file, "\t\n/* END VOUCHER CODE */\n\n");
+    }
     if (ShortCircuit)
       fprintf(file, "#include <mach/rpc.h>\n");
     if (isuser && IsKernelUser) {
@@ -358,9 +388,7 @@ WriteDispatcher(FILE *file)
       descr_count += rtCountArgDescriptors(rt->rtArgs, (int *) 0);
     }
   fprintf(file, "\n");
-  /* 11/30/09 - gab: <rdar://problem/5679615>
-   * MIG-generated code should be consistent in its use of mig_external
-   */
+
   WriteMigExternal(file);
   fprintf(file, "boolean_t %s(\n", ServerDemux);
   fprintf(file, "\t\tmach_msg_header_t *InHeadP,\n");

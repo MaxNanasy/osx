@@ -47,14 +47,6 @@
 # the rights to redistribute these changes.
 #
 
-# 07/12/07 - gab: <rdar://problems/5202843>
-# added logic to determine location of script, so that proper location
-# of helper tools can be found relative to location of script.
-# (Thanks to rgm for the scripting help.)
-
-# 03/20/08 - gab: <rdar://problem/5774620>
-# added logic to pass an '-isysroot' command line option on to the preprocessor
-
 realpath()
 {
 	local FILE="$1"
@@ -105,14 +97,10 @@ fi
 
 # parse out the arguments until we hit plain file name(s)
 
-# 05/08/07 - gab: <rdar://problem/5175104>
-# use array to collect all migcom parameters, to include proper quoting around pathname
-# parameters that may contain whitespace.
-
 until [ $# -eq 0 ]
 do
     case "$1" in
-	-[dtqkKQvVtTrRsSlLxX] ) migflags=( "${migflags[@]}" "$1" ); shift;;
+	-[dtqkKQvVtTrRsSlLxXnN] ) migflags=( "${migflags[@]}" "$1" ); shift;;
 	-i	) sawI=1; migflags=( "${migflags[@]}" "$1" "$2" ); shift; shift;;
 	-user   )  user="$2"; if [ ! "${sawI-}" ]; then migflags=( "${migflags[@]}" "$1" "$2" ); fi; shift; shift;;
 	-server )  server="$2";  migflags=( "${migflags[@]}" "$1" "$2" ); shift; shift;;
@@ -123,12 +111,13 @@ do
 	-arch ) arch="$2"; shift; shift;;
 	-maxonstack ) migflags=( "${migflags[@]}" "$1" "$2"); shift; shift;;
 	-split ) migflags=( "${migflags[@]}" "$1" ); shift;;
-	-MD ) sawMD=1; cppflags="$cppflags $1"; shift;;
+	-novouchers ) migflags=( "${migflags[@]}" "$1" ); shift;;
+	-MD ) sawMD=1; cppflags=( "${cppflags[@]}" "$1"); shift;;
 	-cpp) shift; shift;;
 	-cc) C="$2"; shift; shift;;
 	-migcom) M="$2"; shift; shift;;
 	-isysroot) sdkRoot=$(realpath "$2"); shift; shift;;
-	-* ) cppflags="$cppflags $1"; shift;;
+	-* ) cppflags=( "${cppflags[@]}" "$1"); shift;;
 	* ) break;;
     esac
 done
@@ -137,7 +126,7 @@ done
 until [ $# -eq 0 ]
 do
     case "$1" in
-	-[dtqkKQvVtTrRsSlLxX] ) echo "warning: option \"$1\" after filename(s) ignored"; shift; continue;;
+	-[dtqkKQvVtTrRsSlLxXnN] ) echo "warning: option \"$1\" after filename(s) ignored"; shift; continue;;
 	-i	) echo "warning: option \"$1 $2\" after filename(s) ignored"; shift; shift; continue;;
 	-user   ) echo "warning: option \"$1 $2\" after filename(s) ignored"; shift; shift; continue;;
 	-server ) echo "warning: option \"$1 $2\" after filename(s) ignored"; shift; shift; continue;;
@@ -148,6 +137,7 @@ do
 	-arch ) echo "warning: option \"$1 $2\" after filename(s) ignored"; shift ; shift; continue;;
 	-maxonstack ) echo "warning: option \"$1 $2\" after filename(s) ignored"; shift; shift; continue;;
 	-split ) echo "warning: option \"$1\" after filename(s) ignored"; shift; continue;;
+	-novouchers ) echo "warning: option \"$1\" after filename(s) ignored"; shift; continue;;
 	-MD ) echo "warning: option \"$1\" after filename(s) ignored"; shift; continue;;
 	-cpp) echo "warning: option \"$1 $2\" after filename(s) ignored"; shift; shift; continue;;
 	-cc) echo "warning: option \"$1 $2\" after filename(s) ignored"; shift; shift; continue;;
@@ -163,10 +153,20 @@ do
     then
       iSysRootParm=( "-isysroot" "${sdkRoot}" )
     fi
+    if [ ! -r "${file}" ]
+    then
+      echo "error: cannot read file ${file}"
+      rm -rf ${WORKTMP}
+      exit 1
+    fi
     rm -f "${temp}.c" "${temp}.d"
     (echo '#line 1 '\"${file}\" ; cat "${file}" ) > "${temp}.c"
-    "$C" -E -arch ${arch} ${cppflags} -I "${sourcedir}" "${iSysRootParm[@]}" "${temp}.c" | "$M" "${migflags[@]}" || rm -df "${temp}.c" "${temp}.d" "${WORKTMP}" | exit
-
+    "$C" -E -arch ${arch} "${cppflags[@]}" -I "${sourcedir}" "${iSysRootParm[@]}" "${temp}.c" | "$M" "${migflags[@]}"
+    if [ $? -ne 0 ]
+    then
+      rm -rf "${temp}.c" "${temp}.d" "${WORKTMP}"
+      exit 1
+    fi
     if [ "${sawMD}" -a -f "${temp}.d" ]
     then
 	deps=

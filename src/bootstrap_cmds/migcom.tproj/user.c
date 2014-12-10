@@ -2,23 +2,22 @@
  * Copyright (c) 1999-2003, 2008-2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- *
- * "Portions Copyright (c) 1999, 2008 Apple Inc.  All Rights
- * Reserved.  This file contains Original Code and/or Modifications of
- * Original Code as defined in and that are subject to the Apple Public
- * Source License Version 2.0 (the 'License').  You may not use this file
- * except in compliance with the License.  Please obtain a copy of the
- * License at http://www.apple.com/publicsource and read it before using
- * this file.
- *
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License."
- *
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
  * @APPLE_LICENSE_HEADER_END@
  */
 /*
@@ -229,9 +228,15 @@ WriteMachErrorDefines(FILE *file)
 }
 
 static void
-WriteNDRDefines(FILE *file)
+WriteMIGCheckDefines(FILE *file)
 {
   fprintf(file, "#define\t__MIG_check__Reply__%s_subsystem__ 1\n", SubsystemName);
+  fprintf(file, "\n");
+}
+  
+static void
+WriteNDRDefines(FILE *file)
+{
   fprintf(file, "#define\t__NDR_convert__Reply__%s_subsystem__ 1\n", SubsystemName);
   fprintf(file, "#define\t__NDR_convert__mig_reply_error_subsystem__ 1\n");
   fprintf(file, "\n");
@@ -245,7 +250,9 @@ static void
 WriteProlog(FILE *file, statement_t *stats)
 {
   WriteIdentificationString(file);
-  WriteNDRDefines(file);
+  WriteMIGCheckDefines(file);
+  if (CheckNDR)
+	  WriteNDRDefines(file);
   WriteMyIncludes(file, stats);
   WriteBogusDefines(file);
   WriteMachErrorDefines(file);
@@ -321,6 +328,17 @@ WriteRequestHead(FILE *file, routine_t *rt)
     fprintf(file, "\tInP->%s = mig_get_reply_port();\n", rt->rtReplyPort->argMsgField);
   
   fprintf(file, "\tInP->Head.msgh_id = %d;\n", rt->rtNumber + SubsystemBase);
+
+
+  if (IsVoucherCodeAllowed && !IsKernelUser && !IsKernelServer) {
+    fprintf(file, "\t\n/* BEGIN VOUCHER CODE */\n\n");
+    fprintf(file, "#ifdef USING_VOUCHERS\n");
+    fprintf(file, "\tif (voucher_mach_msg_set != NULL) {\n");
+    fprintf(file, "\t\tvoucher_mach_msg_set(&InP->Head);\n");
+    fprintf(file, "\t}\n");
+    fprintf(file, "#endif // USING_VOUCHERS\n");
+    fprintf(file, "\t\n/* END VOUCHER CODE */\n");
+  }
 }
 
 /*************************************************************
@@ -444,8 +462,6 @@ WriteRetCodeArg(FILE *file, register routine_t *rt)
   }
 }
 
-// 10/26/06 - GAB: <rdar://problem/4343113>
-// emit logic to prevent memory leaks if the call times out
 /*************************************************************
  *   Writes the logic to check for a message send timeout, and
  *   deallocate any relocated ool data so as not to leak.
@@ -464,8 +480,7 @@ WriteMsgCheckForTimeout(FILE *file, routine_t *rt)
       if (akCheck(arg_ptr->argKind, akbSendKPD) && arg_ptr->argKPD_Type == MACH_MSG_OOL_DESCRIPTOR) {
         //    generate code to test current arg address vs. address before the msg_send call
         //    if not at the same address, mig_deallocate the argument
-        // 11/19/09 - gab: <rdar://problem/7300079>: Emit typecast if necessary
-        fprintf(file, "\t\tif((vm_offset_t) InP->%s.address != (vm_offset_t) %s)\n", 
+        fprintf(file, "\t\tif((vm_offset_t) InP->%s.address != (vm_offset_t) %s)\n",
 		arg_ptr->argVarName, arg_ptr->argVarName);
         fprintf(file, "\t\t\t"   "mig_deallocate((vm_offset_t) InP->%s.address, "
 		"(vm_size_t) InP->%s.size);\n", arg_ptr->argVarName, arg_ptr->argVarName);
@@ -516,7 +531,6 @@ WriteMsgSend(FILE *file, routine_t *rt)
   
   WriteApplMacro(file, "Send", "After", rt);
   
-  // 10/26/06 - GAB: <rdar://problem/4343113>
   WriteMsgCheckForTimeout(file, rt);
   
   WriteReturn(file, rt, "\t", "msg_result", "\n");
@@ -584,9 +598,9 @@ WriteMsgSendReceive(FILE *file, routine_t *rt)
   
   fprintf(file, "\tmsg_result = mach_msg(&Out0P->Head, MACH_RCV_MSG|%s%s%s, 0, (mach_msg_size_t)sizeof(Reply), InP->Head.msgh_local_port, %s, MACH_PORT_NULL);\n",
           rt->rtUserImpl != 0 ? "MACH_RCV_TRAILER_TYPE(MACH_MSG_TRAILER_FORMAT_0)|" : "",
-          rt->rtWaitTime != argNULL ? "MACH_RCV_TIMEOUT|" : "",
+          (rt->rtWaitTime != argNULL && akIdent(rt->rtWaitTime->argKind) == akeWaitTime) ? "MACH_RCV_TIMEOUT|" : "",
           rt->rtMsgOption->argVarName,
-          rt->rtWaitTime != argNULL ? rt->rtWaitTime->argVarName : "MACH_MSG_TIMEOUT_NONE");
+          (rt->rtWaitTime != argNULL && akIdent(rt->rtWaitTime->argKind) == akeWaitTime) ? rt->rtWaitTime->argVarName : "MACH_MSG_TIMEOUT_NONE");
   WriteApplMacro(file, "Send", "After", rt);
   WriteMsgCheckReceive(file, rt, "MACH_MSG_SUCCESS");
   fprintf(file, "\n");
@@ -621,7 +635,8 @@ WriteMsgRPC(FILE *file, routine_t *rt)
   if (rt->rtOverwrite) {
     fprintf(file, "\tmsg_result = mach_msg_overwrite(&InP->Head, MACH_SEND_MSG|MACH_RCV_MSG|MACH_RCV_OVERWRITE|%s%s%s, %s, (mach_msg_size_t)sizeof(Reply), InP->Head.msgh_reply_port, %s, MACH_PORT_NULL, ",
             rt->rtUserImpl != 0 ? "MACH_RCV_TRAILER_TYPE(MACH_MSG_TRAILER_FORMAT_0)|" : "",
-            rt->rtWaitTime != argNULL ? "MACH_SEND_TIMEOUT|MACH_RCV_TIMEOUT|" : "",
+            rt->rtWaitTime != argNULL ? 
+	        (akIdent(rt->rtWaitTime->argKind) == akeWaitTime ? "MACH_SEND_TIMEOUT|MACH_RCV_TIMEOUT|" : "MACH_SEND_TIMEOUT|") : "",
             rt->rtMsgOption->argVarName,
             SendSize,
             rt->rtWaitTime != argNULL? rt->rtWaitTime->argVarName : "MACH_MSG_TIMEOUT_NONE");
@@ -630,7 +645,8 @@ WriteMsgRPC(FILE *file, routine_t *rt)
   else {
     fprintf(file, "\tmsg_result = mach_msg(&InP->Head, MACH_SEND_MSG|MACH_RCV_MSG|%s%s%s, %s, (mach_msg_size_t)sizeof(Reply), InP->Head.msgh_reply_port, %s, MACH_PORT_NULL);\n",
             rt->rtUserImpl != 0 ? "MACH_RCV_TRAILER_TYPE(MACH_MSG_TRAILER_FORMAT_0)|" : "",
-            rt->rtWaitTime != argNULL ? "MACH_SEND_TIMEOUT|MACH_RCV_TIMEOUT|" : "",
+            rt->rtWaitTime != argNULL ?
+	        (akIdent(rt->rtWaitTime->argKind) == akeWaitTime ? "MACH_SEND_TIMEOUT|MACH_RCV_TIMEOUT|" : "MACH_SEND_TIMEOUT|") : "",
             rt->rtMsgOption->argVarName,
             SendSize,
             rt->rtWaitTime != argNULL? rt->rtWaitTime->argVarName : "MACH_MSG_TIMEOUT_NONE");
@@ -639,7 +655,6 @@ WriteMsgRPC(FILE *file, routine_t *rt)
     fprintf(file,"#endif /* __MigKernelSpecificCode */\n");
   WriteApplMacro(file, "Send", "After", rt);
   
-  // 10/26/06 - GAB: <rdar://problem/4343113>
   WriteMsgCheckForTimeout(file, rt);
   
   WriteMsgCheckReceive(file, rt, "MACH_MSG_SUCCESS");
@@ -1329,10 +1344,11 @@ WriteRetCodeCheck(FILE *file, routine_t *rt)
     fprintf(file, "\tif (Out0P->RetCode != KERN_SUCCESS) {\n");
   else
     fprintf(file, "\tif (msgh_simple) {\n");
-  
-  fprintf(file, "#ifdef\t__NDR_convert__mig_reply_error_t__defined\n");
-  fprintf(file, "\t\t__NDR_convert__mig_reply_error_t((mig_reply_error_t *)Out0P);\n");
-  fprintf(file, "#endif\t/* __NDR_convert__mig_reply_error_t__defined */\n");
+  if (CheckNDR) {
+    fprintf(file, "#ifdef\t__NDR_convert__mig_reply_error_t__defined\n");
+    fprintf(file, "\t\t__NDR_convert__mig_reply_error_t((mig_reply_error_t *)Out0P);\n");
+    fprintf(file, "#endif\t/* __NDR_convert__mig_reply_error_t__defined */\n");
+  }
   fprintf(file, "\t\treturn ((mig_reply_error_t *)Out0P)->RetCode;\n");
   fprintf(file, "\t}\n");
   fprintf(file, "\n");
@@ -1653,7 +1669,7 @@ WriteExtractArgValueNormal(FILE *file, register argument_t *arg)
 }
 
 static void
-WriteCheckArgSize(FILE *file, register argument_t *arg)
+WriteCalcArgSize(FILE *file, register argument_t *arg)
 {
   register ipc_type_t *ptype = arg->argType;
   register ipc_type_t *btype = ptype->itElement;
@@ -1663,16 +1679,38 @@ WriteCheckArgSize(FILE *file, register argument_t *arg)
   /* If the base type size of the data field isn`t a multiple of 4,
      we have to round up. */
   if (btype->itTypeSize % itWordAlign != 0)
-    fprintf(file, "_WALIGN_");
-  fprintf(file, "(");
-  
-  if (multiplier > 1)
-    fprintf(file, "%d * ", multiplier);
+    fprintf(file, "_WALIGN_(");
   
   fprintf(file, "Out%dP->%s", count->argReplyPos, count->argMsgField);
-  
-  fprintf(file, ")");
+  if (multiplier > 1)
+    fprintf(file, " * %d", multiplier);
+
+  if (btype->itTypeSize % itWordAlign != 0)
+    fprintf(file, ")");
 }
+
+static void
+WriteCheckArgSize(FILE *file, routine_t *rt, argument_t *arg, const char *comparator)
+{
+  register ipc_type_t *ptype = arg->argType;
+  register ipc_type_t *btype = ptype->itElement;
+  argument_t *count = arg->argCount;
+  int multiplier = btype->itTypeSize;
+  
+  fprintf(file, "\tif (((msgh_size - ");
+  rtMinReplySize(file, rt, "__Reply");
+  fprintf(file, ")");
+  if (multiplier > 1)
+	  fprintf(file, " / %d", multiplier);
+  fprintf(file, "< Out%dP->%s) ||\n", count->argReplyPos, count->argMsgField);
+  fprintf(file, "\t    (msgh_size %s ", comparator);
+  rtMinReplySize(file, rt, "__Reply");
+  fprintf(file, " + ");
+  WriteCalcArgSize(file, arg);
+  fprintf(file, ")");
+  fprintf(file, ")\n\t\t{ return MIG_TYPE_ERROR ; }\n");
+}
+
 
 /* NDR Conversion routines */
 
@@ -1801,25 +1839,21 @@ WriteCheckMsgSize(FILE *file, register argument_t *arg)
      we can use the msgh_size_delta value directly in
      the TypeCheck conditional. */
   
-  if (arg->argCount && !arg->argSameCount)
+  if (CheckNDR && arg->argCount && !arg->argSameCount)
     WriteReplyNDRConvertIntRepOneArgUse(file, arg->argCount);
   
   if (arg->argReplyPos == rt->rtMaxReplyPos) {
     fprintf(file, "#if\t__MigTypeCheck\n");
-    fprintf(file, "\tif (msgh_size != ");
-    rtMinReplySize(file, rt, "__Reply");
-    fprintf(file, " + (");
-    WriteCheckArgSize(file, arg);
-    fprintf(file, "))\n");
-    fprintf(file, "\t\t{ return MIG_TYPE_ERROR ; }\n");
 
-    /* 12/15/08 - gab: <rdar://problem/4900700>
+    /*
      * emit code to verify that the server-code-provided count does not exceed the maximum count allowed by the type.
      */
     fprintf(file, "\t" "if ( Out%dP->%s > %d )\n", arg->argCount->argReplyPos, arg->argCount->argMsgField, arg->argType->itNumber);
     fputs("\t\t" "return MIG_TYPE_ERROR;\n", file);
     /* ...end... */
     
+    WriteCheckArgSize(file, rt, arg, "!=");
+
     fprintf(file, "#endif\t/* __MigTypeCheck */\n");
   }
   else {
@@ -1836,26 +1870,19 @@ WriteCheckMsgSize(FILE *file, register argument_t *arg)
        divide btype->itTypeSize (see itCalculateSizeInfo). */
     
     fprintf(file, "\tmsgh_size_delta = ");
-    WriteCheckArgSize(file, arg);
+    WriteCalcArgSize(file, arg);
     fprintf(file, ";\n");
     fprintf(file, "#if\t__MigTypeCheck\n");
-    
-    /* Don't decrement msgh_size until we've checked that
-       it won't underflow. */
-    
-    fprintf(file, "\t" "if (msgh_size %s ", LastVarArg ? "!=" : "<");
-    rtMinReplySize(file, rt, "__Reply");
-    fprintf(file, " + msgh_size_delta)\n");
-    fprintf(file, "\t\t{ return MIG_TYPE_ERROR; }\n");
-    
-    
-    /* 12/15/08 - gab: <rdar://problem/4900700>
+
+    /*
      * emit code to verify that the server-code-provided count does not exceed the maximum count allowed by the type.
      */
     fprintf(file, "\t" "if ( Out%dP->%s > %d )\n", arg->argCount->argReplyPos, arg->argCount->argMsgField, arg->argType->itNumber);
     fputs("\t\t" "return MIG_TYPE_ERROR;\n", file);
     /* ...end... */
     
+    WriteCheckArgSize(file, rt, arg, LastVarArg ? "!=" : "<");
+
     if (!LastVarArg)
       fprintf(file, "\tmsgh_size -= msgh_size_delta;\n");
     
@@ -2179,8 +2206,9 @@ WriteShortCircInArgBefore(FILE *file, register argument_t *arg)
       if (!argIsOut(arg) && !(arg->argFlags & flConst)) {
         /* Have to copy it into a temp.  Use a stack var, if this would
          * not overflow the -maxonstack specification:
+         * Conservatively assume ILP32 thresholds
          */
-        if (it->itTypeSize <= sizeof(char *) ||
+        if (it->itTypeSize <= sizeof(natural_t) ||
             rtMessOnStack(arg->argRoutine) ||
             arg->argRoutine->rtTempBytesOnStack +
             it->itTypeSize <= MaxMessSizeOnStack) {
@@ -2404,7 +2432,8 @@ WriteShortCircRPC(FILE *file, register routine_t *rt)
       else
         continue;
       fprintf(file, "\tchar *_%sTemp_;\n", arg->argVarName);
-      rt->rtTempBytesOnStack += sizeof(char *);
+      /* Conservatively assume ILP32 thresholds */
+      rt->rtTempBytesOnStack += sizeof(natural_t);
     }
     
     /* Process the IN arguments, in order: */
@@ -2616,11 +2645,14 @@ WriteCheckReply(FILE *file, routine_t *rt)
     return;
   
   fprintf(file, "\n");
-  fprintf(file, "#if ( __MigTypeCheck || __NDR_convert__ )\n");
+  fprintf(file, "#if ( __MigTypeCheck ");
+  if (CheckNDR)
+	  fprintf(file, "|| __NDR_convert__ ");
+  fprintf(file, ")\n");
   fprintf(file, "#if __MIG_check__Reply__%s_subsystem__\n", SubsystemName);
   fprintf(file, "#if !defined(__MIG_check__Reply__%s_t__defined)\n", rt->rtName);
   fprintf(file, "#define __MIG_check__Reply__%s_t__defined\n", rt->rtName);
-  if (akCheck(rt->rtNdrCode->argKind, akbReply)) {
+  if (CheckNDR && akCheck(rt->rtNdrCode->argKind, akbReply)) {
     WriteList(file, rt->rtArgs, WriteReplyNDRConvertIntRepArgDecl, akbReturnNdr, "\n", "\n");
     WriteList(file, rt->rtArgs, WriteReplyNDRConvertCharRepArgDecl, akbReturnNdr, "\n", "\n");
     WriteList(file, rt->rtArgs, WriteReplyNDRConvertFloatRepArgDecl, akbReturnNdr, "\n", "\n");
@@ -2656,7 +2688,7 @@ WriteCheckReply(FILE *file, routine_t *rt)
      return it directly. */
   
   if (rt->rtNoReplyArgs && !rt->rtUserImpl) {
-    if (akCheck(rt->rtNdrCode->argKind, akbReply) && rt->rtRetCode)
+    if (CheckNDR && akCheck(rt->rtNdrCode->argKind, akbReply) && rt->rtRetCode)
       WriteReplyNDRConvertIntRepOneArgUse(file, rt->rtRetCode);
     WriteReturn(file, rt, "\t", stRetCode, "\n");
   }
@@ -2693,7 +2725,7 @@ WriteCheckReply(FILE *file, routine_t *rt)
       }
     }
     
-    if (akCheck(rt->rtNdrCode->argKind, akbReply)) {
+    if (CheckNDR && akCheck(rt->rtNdrCode->argKind, akbReply)) {
       fprintf(file, "#if\t");
       WriteList(file, rt->rtArgs, WriteReplyNDRConvertIntRepArgCond, akbReturnNdr, " || \\\n\t", "\n");
       fprintf(file, "\tif (Out0P->NDR.int_rep != NDR_record.int_rep) {\n");
@@ -2717,8 +2749,10 @@ WriteCheckReply(FILE *file, routine_t *rt)
   fprintf(file, "}\n");
   fprintf(file, "#endif /* !defined(__MIG_check__Reply__%s_t__defined) */\n", rt->rtName);
   fprintf(file, "#endif /* __MIG_check__Reply__%s_subsystem__ */\n", SubsystemName);
-  fprintf(file, "#endif /* ( __MigTypeCheck || __NDR_convert__ ) */\n");
-  fprintf(file, "\n");
+  fprintf(file, "#endif /* ( __MigTypeCheck ");
+  if (CheckNDR)
+	  fprintf(file, "|| __NDR_convert__ ");
+  fprintf(file, ") */\n\n");
 }
 
 static void

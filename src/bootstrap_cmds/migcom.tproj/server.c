@@ -2,23 +2,22 @@
  * Copyright (c) 1999-2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- *
- * "Portions Copyright (c) 1999, 2008 Apple Inc.  All Rights
- * Reserved.  This file contains Original Code and/or Modifications of
- * Original Code as defined in and that are subject to the Apple Public
- * Source License Version 1.0 (the 'License').  You may not use this file
- * except in compliance with the License.  Please obtain a copy of the
- * License at http://www.apple.com/publicsource and read it before using
- * this file.
- *
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License."
- *
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
  * @APPLE_LICENSE_HEADER_END@
  */
 /*
@@ -205,11 +204,17 @@ WriteForwardDeclarations(FILE *file, statement_t *stats)
 }
 
 static void
+WriteMIGCheckDefines(FILE *file)
+{
+   fprintf(file, "#define\t__MIG_check__Request__%s_subsystem__ 1\n", SubsystemName);
+   fprintf(file, "\n");
+}
+
+static void
 WriteNDRDefines(FILE *file)
 {
-  fprintf(file, "#define\t__MIG_check__Request__%s_subsystem__ 1\n", SubsystemName);
-  fprintf(file, "#define\t__NDR_convert__Request__%s_subsystem__ 1\n", SubsystemName);
-  fprintf(file, "\n");
+   fprintf(file, "#define\t__NDR_convert__Request__%s_subsystem__ 1\n", SubsystemName);
+   fprintf(file, "\n");
 }
 
 static void
@@ -219,8 +224,9 @@ WriteProlog(FILE *file, statement_t *stats)
   fprintf(file, "\n");
   fprintf(file, "/* Module %s */\n", SubsystemName);
   fprintf(file, "\n");
-
-  WriteNDRDefines(file);
+  WriteMIGCheckDefines(file);
+  if (CheckNDR)
+	  WriteNDRDefines(file);
   WriteMyIncludes(file, stats);
   WriteBogusDefines(file);
   WriteApplDefaults(file, "Rcv");
@@ -258,15 +264,14 @@ WriteRoutineEntries(FILE *file, statement_t *stats)
   char *sig_array, *rt_name;
   int arg_count, descr_count;
   int offset = 0;
-  int serverSubsysNameLen = strlen(ServerSubsys);
+  size_t serverSubsysNameLen = strlen(ServerSubsys);
 
   fprintf(file, "\t{\n");
   for (stat = stats; stat != stNULL; stat = stat->stNext)
     if (stat->stKind == skRoutine) {
       register  routine_t *rt = stat->stRoutine;
-      int       rtNameLen = strlen(rt->rtName);
+      size_t       rtNameLen = strlen(rt->rtName);
 
-      // 10/30/06 - GAB: <rdar://problem/4672570>
       // Include length of rt->rtName in calculation of necessary buffer size, since that string
       // is actually written into the buffer along with the Server Subsystem name.
       sig_array = (char *) malloc(serverSubsysNameLen + rtNameLen + 80);
@@ -331,9 +336,6 @@ WriteSubsystem(FILE *file, statement_t *stats)
     }
   fprintf(file, "\n");
   if (ServerHeaderFileName == strNULL) {
-  	/* 11/30/09 - gab: <rdar://problem/5679615>
-     * MIG-generated code should be consistent in its use of mig_external
-     */
     WriteMigExternal(file);
     fprintf(file, "boolean_t %s(", ServerDemux);
     if (BeAnsiC) {
@@ -755,7 +757,7 @@ void
 WriteRequestNDRConvertCharRepArgCond(FILE *file, argument_t *arg)
 {
   routine_t *rt = arg->argRoutine;
-
+  
   if (akIdent(arg->argKind) != akeCount && akIdent(arg->argKind) != akeCountInOut)
     fprintf(file, "defined(__NDR_convert__char_rep__Request__%s_t__%s__defined)", rt->rtName, arg->argMsgField);
   else
@@ -856,9 +858,8 @@ WriteRequestNDRConvertFloatRepArgUse(FILE *file, argument_t *arg)
     WriteRequestNDRConvertArgUse(file, arg, "float_rep");
 }
 
-
 static void
-WriteCheckArgSize(FILE *file, register argument_t *arg)
+WriteCalcArgSize(FILE *file, register argument_t *arg)
 {
   register ipc_type_t *ptype = arg->argType;
 
@@ -886,31 +887,51 @@ WriteCheckArgSize(FILE *file, register argument_t *arg)
 }
 
 static void
+WriteCheckArgSize(FILE *file, routine_t *rt, argument_t *arg, const char *comparator)
+{
+  register ipc_type_t *ptype = arg->argType;
+
+
+  fprintf(file, "\tif (((msgh_size - ");
+  rtMinRequestSize(file, rt, "__Request");
+  fprintf(file, ") ");
+  if (PackMsg == FALSE) {
+	  fprintf(file, "%s %d)", comparator, ptype->itTypeSize + ptype->itPadSize);
+  } else if (IS_OPTIONAL_NATIVE(ptype)) {
+	  fprintf(file, "%s (In%dP->__Present__%s ? _WALIGNSZ_(%s) : 0))" , comparator, arg->argRequestPos, arg->argMsgField, ptype->itServerType);
+  } else {
+    register ipc_type_t *btype = ptype->itElement;
+    argument_t *count = arg->argCount;
+    int multiplier = btype->itTypeSize;
+
+    if (multiplier > 1)
+      fprintf(file, "/ %d ", multiplier);
+    fprintf(file, "< In%dP->%s) ||\n", count->argRequestPos, count->argMsgField);
+    fprintf(file, "\t    (msgh_size %s ", comparator);
+    rtMinRequestSize(file, rt, "__Request");
+    fprintf(file, " + ");
+    WriteCalcArgSize(file, arg);
+    fprintf(file, ")");
+  }
+  fprintf(file, ")\n\t\treturn MIG_BAD_ARGUMENTS;\n");
+}
+
+static void
 WriteCheckMsgSize(FILE *file, register argument_t *arg)
 {
   register routine_t *rt = arg->argRoutine;
-
-  /* If there aren't any more In args after this, then
-     we can use the msgh_size_delta value directly in
-     the TypeCheck conditional. */
 
   if (arg->argCount && !arg->argSameCount)
     WriteRequestNDRConvertIntRepOneArgUse(file, arg->argCount);
   if (arg->argRequestPos == rt->rtMaxRequestPos)  {
     fprintf(file, "#if\t__MigTypeCheck\n");
-    fprintf(file, "\tif (msgh_size != ");
-    rtMinRequestSize(file, rt, "__Request");
-    fprintf(file, " + (");
-    WriteCheckArgSize(file, arg);
-    fprintf(file, "))\n");
 
-    fprintf(file, "\t\treturn MIG_BAD_ARGUMENTS;\n");
-
-    /* 12/15/08 - gab: <rdar://problem/4900700>
-       emit code to verify that the user-code-provided count does not exceed the maximum count allowed by the type. */
+    /* verify that the user-code-provided count does not exceed the maximum count allowed by the type. */
     fprintf(file, "\t" "if ( In%dP->%s > %d )\n", arg->argCount->argRequestPos, arg->argCount->argMsgField, arg->argType->itNumber);
     fputs("\t\t" "return MIG_BAD_ARGUMENTS;\n", file);
     /* ...end... */
+
+    WriteCheckArgSize(file, rt, arg, "!=");
 
     fprintf(file, "#endif\t/* __MigTypeCheck */\n");
   }
@@ -928,26 +949,18 @@ WriteCheckMsgSize(FILE *file, register argument_t *arg)
        divide btype->itTypeSize (see itCalculateSizeInfo). */
 
     fprintf(file, "\tmsgh_size_delta = ");
-    WriteCheckArgSize(file, arg);
+    WriteCalcArgSize(file, arg);
     fprintf(file, ";\n");
     fprintf(file, "#if\t__MigTypeCheck\n");
 
-    /* Don't decrement msgh_size until we've checked that
-       it won't underflow. */
-
-    if (LastVarArg)
-      fprintf(file, "\tif (msgh_size != ");
-    else
-      fprintf(file, "\tif (msgh_size < ");
-    rtMinRequestSize(file, rt, "__Request");
-    fprintf(file, " + msgh_size_delta)\n");
-    fprintf(file, "\t\treturn MIG_BAD_ARGUMENTS;\n");
-
-    /* 12/15/08 - gab: <rdar://problem/4900700>
-       emit code to verify that the user-code-provided count does not exceed the maximum count allowed by the type. */
+    /* verify that the user-code-provided count does not exceed the maximum count allowed by the type. */
     fprintf(file, "\t" "if ( In%dP->%s > %d )\n", arg->argCount->argRequestPos, arg->argCount->argMsgField, arg->argType->itNumber);
     fputs("\t\t" "return MIG_BAD_ARGUMENTS;\n", file);
     /* ...end... */
+
+    /* Don't decrement msgh_size until we've checked that
+       it won't underflow. */
+    WriteCheckArgSize(file, rt, arg, LastVarArg ? "!=" : "<");
 
     if (!LastVarArg)
       fprintf(file, "\tmsgh_size -= msgh_size_delta;\n");
@@ -1296,7 +1309,7 @@ WriteDestroyArg(FILE *file, register argument_t *arg)
     if (IsKernelServer) {
       fprintf(file, "#endif /* __MigKernelSpecificCode */\n");
     }
-    fprintf(file, "\t%s = (vm_offset_t) 0;\n", InArgMsgField(arg, ""));
+    fprintf(file, "\t%s = (void *) 0;\n", InArgMsgField(arg, ""));
     fprintf(file, "\tIn%dP->%s.%s = (mach_msg_size_t) 0;\n", arg->argRequestPos, arg->argMsgField, (RPCPortArray(arg) ? "count" : "size"));
   }
   else {
@@ -1943,7 +1956,7 @@ WritePackArgValueVariable(FILE *file, register argument_t *arg)
    * only itString are treated here so far
    */
   if (it->itString) {
-    /* 11/25/09 - gab: <rdar://problem/6237652>
+    /*
      * Emit logic to call strlen to calculate the size of the argument, and ensure that it fits within the 32-bit result field
      * in the Reply, when targeting a 64-bit architecture. If a 32-bit architecture is the target, we emit code to just call
      * strlen() directly (since it'll return a 32-bit value that is guaranteed to fit).
@@ -2217,7 +2230,6 @@ InitKPD_Disciplines(argument_t *args)
 
 static void WriteStringTerminatorCheck(FILE *file, routine_t *rt)
 {
-  // 07/10/08 - gab: <rdar://problems/4636934>
   // generate code to verify that the length of a C string is not greater than the size of the
   // buffer in which it is stored.
   argument_t  *argPtr;
@@ -2294,7 +2306,6 @@ static void WriteStringTerminatorCheck(FILE *file, routine_t *rt)
 static void
 WriteOOLSizeCheck(FILE *file, routine_t *rt)
 {
-  /* 12/23/2008 - gab: <rdar://problem/4634360> */
   /* Emit code to validate the actual size of ool data vs. the reported size */
 
   argument_t  *argPtr;
@@ -2330,11 +2341,10 @@ WriteOOLSizeCheck(FILE *file, routine_t *rt)
     
       if (!test) {
         int multiplier = (argCountPtr->argMultiplier > 1 || it->itSize > 8) ? argCountPtr->argMultiplier * it->itSize / 8 : 1;
-        fprintf(file, "\t%s" "if (%ssize != In%dP->%s%s",
-          tab, string, argCountPtr->argRequestPos, argCountPtr->argVarName, IS_MULTIPLE_KPD(it) ? "[i]" : "" );
+        fprintf(file, "\t%s" "if (%ssize ", tab, string);
         if (multiplier > 1)
-          fprintf(file, " * %d", multiplier);
-        fputs(")\n", file);
+          fprintf(file, "/ %d ", multiplier);
+	fprintf(file,"!= In%dP->%s%s)\n", argCountPtr->argRequestPos, argCountPtr->argVarName, IS_MULTIPLE_KPD(it) ? "[i]" : "");
 
         fprintf(file, "\t\t%s" "return MIG_TYPE_ERROR;\n", tab);
       }
@@ -2359,11 +2369,14 @@ WriteCheckRequest(FILE *file, routine_t *rt)
   InitKPD_Disciplines(rt->rtArgs);
 
   fprintf(file, "\n");
-  fprintf(file, "#if ( __MigTypeCheck || __NDR_convert__ )\n");
+  fprintf(file, "#if ( __MigTypeCheck ");
+  if (CheckNDR) 
+	  fprintf(file, "|| __NDR_convert__ ");
+  fprintf(file, ")\n");
   fprintf(file, "#if __MIG_check__Request__%s_subsystem__\n", SubsystemName);
   fprintf(file, "#if !defined(__MIG_check__Request__%s_t__defined)\n", rt->rtName);
   fprintf(file, "#define __MIG_check__Request__%s_t__defined\n", rt->rtName);
-  if (akCheck(rt->rtNdrCode->argKind, akbRequest)) {
+  if (CheckNDR && akCheck(rt->rtNdrCode->argKind, akbRequest)) {
     WriteList(file, rt->rtArgs, WriteRequestNDRConvertIntRepArgDecl, akbSendNdr, "", "");
     WriteList(file, rt->rtArgs, WriteRequestNDRConvertCharRepArgDecl, akbSendNdr, "", "");
     WriteList(file, rt->rtArgs, WriteRequestNDRConvertFloatRepArgDecl, akbSendNdr, "", "");
@@ -2410,12 +2423,14 @@ WriteCheckRequest(FILE *file, routine_t *rt)
     }
   }
 
-  if (akCheck(rt->rtNdrCode->argKind, akbRequest)) {
+  if (CheckNDR && akCheck(rt->rtNdrCode->argKind, akbRequest)) {
     fprintf(file, "#if\t");
     WriteList(file, rt->rtArgs, WriteRequestNDRConvertIntRepArgCond, akbSendNdr, " || \\\n\t", "\n");
     fprintf(file, "\tif (In0P->NDR.int_rep != NDR_record.int_rep) {\n");
     WriteList(file, rt->rtArgs, WriteRequestNDRConvertIntRepArgUse, akbSendNdr, "", "");
     fprintf(file, "\t}\n#endif\t/* defined(__NDR_convert__int_rep...) */\n\n");
+
+    WriteOOLSizeCheck(file, rt);
 
     fprintf(file, "#if\t");
     WriteList(file, rt->rtArgs, WriteRequestNDRConvertCharRepArgCond, akbSendNdr, " || \\\n\t", "\n");
@@ -2428,19 +2443,20 @@ WriteCheckRequest(FILE *file, routine_t *rt)
     fprintf(file, "\tif (In0P->NDR.float_rep != NDR_record.float_rep) {\n");
     WriteList(file, rt->rtArgs, WriteRequestNDRConvertFloatRepArgUse, akbSendNdr, "", "");
     fprintf(file, "\t}\n#endif\t/* defined(__NDR_convert__float_rep...) */\n\n");
+  } else {
+   WriteOOLSizeCheck(file, rt);
   }
 
-  // 07/10/08 - gab: <rdar://problem/4636934>
   WriteStringTerminatorCheck(file, rt);
-  
-  // 12/23/08 - gab: <rdar://problem/4634360>
-  WriteOOLSizeCheck(file, rt);
   
   fprintf(file, "\treturn MACH_MSG_SUCCESS;\n");
   fprintf(file, "}\n");
   fprintf(file, "#endif /* !defined(__MIG_check__Request__%s_t__defined) */\n", rt->rtName);
   fprintf(file, "#endif /* __MIG_check__Request__%s_subsystem__ */\n", SubsystemName);
-  fprintf(file, "#endif /* ( __MigTypeCheck || __NDR_convert__ ) */\n");
+  fprintf(file, "#endif /* ( __MigTypeCheck ");
+  if (CheckNDR)
+	  fprintf(file, "|| __NDR_convert__ ");
+  fprintf(file, ") */\n");
   fprintf(file, "\n");
 }
 
