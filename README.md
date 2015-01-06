@@ -3,6 +3,8 @@ OS X source packages imported to GitHub
 
 This repo contains an unofficial GitHub-import of the OS X source packages from http://opensource.apple.com/
 
+New source releases are imported automatically as they are published on http://opensource.apple.com/
+
 Which source package contains the source for OS X binary X?
 -----------------------------------------------------------
 
