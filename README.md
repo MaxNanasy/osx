@@ -3,8 +3,8 @@ OS X source packages imported to GitHub
 
 This repo contains an unofficial GitHub-import of the OS X source packages from http://opensource.apple.com/
 
-Which source package contains the source for OS X binary `X`?
--------------------------------------------------------------
+Which source package contains the source for OS X binary X?
+-----------------------------------------------------------
 
 Use the OS X `what` command to find out in which source package a certain binary can be found.
 
