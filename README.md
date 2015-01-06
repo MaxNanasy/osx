@@ -15,4 +15,4 @@ Example: Where can I find the source to `ls`?
     	 Copyright (c) 1989, 1993, 1994
     	PROGRAM:ls  PROJECT:file_cmds-242
 
-The source for the `ls` command can be found in the `file_cmds` source package.
+The source for the `ls` command can be found in the <a href="https://github.com/practicalswift/osx/tree/master/src/file_cmds">`file_cmds`</a> source package.
