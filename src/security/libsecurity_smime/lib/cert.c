@@ -179,13 +179,13 @@ SecCertificateRef CERT_FindUserCertByUsage(SecKeychainRef keychainOrArray,
     const char *serialNumber = "12345678";
  //   const SecKeychainAttributeList attrList;
 #if 0
-    attrs[1].tag = kSecLabelItemAttr;
-    attrs[1].length = strlen(nickname)+1;
-    attrs[1].data = nickname;
+    attrs[0].tag = kSecLabelItemAttr;
+    attrs[0].length = strlen(nickname)+1;
+    attrs[0].data = nickname;
 #else
-    attrs[1].tag = kSecSerialNumberItemAttr;
-    attrs[1].length = strlen(serialNumber)+1;
-    attrs[1].data = (uint8 *)serialNumber;
+    attrs[0].tag = kSecSerialNumberItemAttr;
+    attrs[0].length = strlen(serialNumber)+1;
+    attrs[0].data = (uint8 *)serialNumber;
 #endif
     SecKeychainAttributeList attrList = { 0, attrs };
  //   12 34 56 78

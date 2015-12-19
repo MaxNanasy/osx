@@ -32,6 +32,7 @@
 #include <System/sys/codesign.h>
 #include <bsm/libbsm.h>
 #include <inttypes.h>
+#include <syslog.h>
 #include <utilities/SecCFWrappers.h>
 
 #define USE_LIBPROC  0
@@ -207,7 +208,37 @@ static bool SecTaskLoadEntitlements(SecTaskRef task, CFErrorRef *error)
     
     ret = csops_task(task, CS_OPS_ENTITLEMENTS_BLOB, &header, sizeof(header));
     /* Any other combination means no entitlements */
-    if (ret == -1 && errno == ERANGE) {
+	if (ret == -1) {
+		if (errno != ERANGE) {
+            int entitlementErrno = errno;
+
+			uint32_t cs_flags = -1;
+            if (-1 == csops_task(task, CS_OPS_STATUS, &cs_flags, sizeof(cs_flags))) {
+                syslog(LOG_NOTICE, "Failed to get cs_flags, error=%d", errno);
+            }
+
+            syslog(LOG_NOTICE, "SecTaskLoadEntitlements failed error=%d cs_flags=%x, task->pid_self=%d", entitlementErrno, cs_flags, task->pid_self);	// to ease diagnostics
+
+            CFStringRef description = SecTaskCopyDebugDescription(task);
+            char *descriptionBuf = NULL;
+            CFIndex descriptionSize = CFStringGetLength(description) * 4;
+            descriptionBuf = (char *)malloc(descriptionSize);
+            if (!CFStringGetCString(description, descriptionBuf, descriptionSize, kCFStringEncodingUTF8)) {
+                descriptionBuf[0] = 0;
+            }
+
+            syslog(LOG_NOTICE, "SecTaskCopyDebugDescription: %s", descriptionBuf);
+            CFRelease(description);
+            free(descriptionBuf);
+
+			// EINVAL is what the kernel says for unsigned code, so we'll have to let that pass
+			if (entitlementErrno == EINVAL) {
+				task->entitlementsLoaded = true;
+				return true;
+			}
+			ret = entitlementErrno;	// what really went wrong
+			goto out;		// bail out
+		}
         bufferlen = ntohl(header.length);
         /* check for insane values */
         if (bufferlen > 1024 * 1024 || bufferlen < 8) {

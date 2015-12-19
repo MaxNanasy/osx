@@ -10,8 +10,8 @@
 #import "MyKeychain.h"
 
 #import <CKBridge/SOSCloudKeychainClient.h>
-#import <SecureObjectSync/SOSCloudCircle.h>
-#import <SecureObjectSync/SOSCloudCircleInternal.h>
+#import <Security/SecureObjectSync/SOSCloudCircle.h>
+#import <Security/SecureObjectSync/SOSCloudCircleInternal.h>
 #import <notify.h>
 #import <dispatch/dispatch.h>
 
@@ -129,6 +129,18 @@ __unused static const uint64_t maxTimeToWaitInSeconds = 30ull * NSEC_PER_SEC;
             break;
         case kSOSCCNotInCircle:
             bx = SOSCCRequestToJoinCircle(&error);
+            if (bx) {
+                CFMutableSetRef viewsToEnable = CFSetCreateMutable(NULL, 0, NULL);
+                CFMutableSetRef viewsToDisable = CFSetCreateMutable(NULL, 0, NULL);
+                CFSetAddValue(viewsToEnable, (void*)kSOSViewWiFi);
+                CFSetAddValue(viewsToEnable, (void*)kSOSViewAutofillPasswords);
+                CFSetAddValue(viewsToEnable, (void*)kSOSViewSafariCreditCards);
+                CFSetAddValue(viewsToEnable, (void*)kSOSViewOtherSyncable);
+                
+                bx = SOSCCViewSet(viewsToEnable, viewsToDisable);
+                CFRelease(viewsToEnable);
+                CFRelease(viewsToDisable);
+            }
             break;
         default:
             NSLog(@"Request to join circle with bad status:  %@ (%d)", SOSCCGetStatusDescription(ccstatus), ccstatus);

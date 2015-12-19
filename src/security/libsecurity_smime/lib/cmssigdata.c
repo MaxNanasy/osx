@@ -551,12 +551,20 @@ SecCmsSignedDataVerifySignerInfo(SecCmsSignedDataRef sigd, int i,
 
     /* verify signature */
     status = SecCmsSignerInfoVerify(signerinfo, digest, contentType);
-    if (status)
-	return status;
+#if SECTRUST_VERBOSE_DEBUG
+	syslog(LOG_ERR, "SecCmsSignedDataVerifySignerInfo: SecCmsSignerInfoVerify returned %d, will %sverify cert",
+		(int)status, (status) ? "NOT " : "");
+#endif
+    if (status) {
+        return status;
+    }
 
     /* Now verify the certificate.  We do this even if the signature failed to verify so we can
        return a trustRef to the caller for display purposes.  */
     status = SecCmsSignerInfoVerifyCertificate(signerinfo, keychainOrArray, policies, trustRef);
+#if SECTRUST_VERBOSE_DEBUG
+	syslog(LOG_ERR, "SecCmsSignedDataVerifySignerInfo: SecCmsSignerInfoVerifyCertificate returned %d", (int)status);
+#endif
 
     return status;
 }

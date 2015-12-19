@@ -242,16 +242,16 @@ static CFTypeRef CERT_FindByIssuerAndSN (CFTypeRef keychainOrArray, CFTypeRef cl
             if (nic && CFEqual(nic, issuer)) {
                 CFDataRef cert_serial = SecCertificateCopySerialNumber(cert);
                 if (cert_serial) {
-		  bool found = CFEqual(cert_serial, serial);
-		  CFRelease(cert_serial);
-		  if (found) {
-                    CFRetain(cert);
-                    ident = cert;
-                    goto out;
-		  }
-		}
-	    }
-	}
+                    bool found = CFEqual(cert_serial, serial);
+                    CFRelease(cert_serial);
+                    if (found) {
+                        CFRetain(cert);
+                        ident = cert;
+                        goto out;
+                    }
+                }
+            }
+        }
     }
 
 	const void *keys[] = { kSecClass, kSecAttrIssuer, kSecAttrSerialNumber, kSecReturnRef };

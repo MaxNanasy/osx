@@ -573,9 +573,17 @@ SecCmsSignerInfoVerifyCertificate(SecCmsSignerInfoRef signerinfo, SecKeychainRef
     {
 	if (PORT_GetError() == SEC_ERROR_UNTRUSTED_CERT)
 	{
-	    /* Signature or digest level verificationStatus errors should supercede certificate level errors, so only change the verificationStatus if the status was GoodSignature. */
-	    if (signerinfo->verificationStatus == SecCmsVSGoodSignature)
-		signerinfo->verificationStatus = SecCmsVSSigningCertNotTrusted;
+		/* Signature or digest level verificationStatus errors should supercede certificate level errors, so only change the verificationStatus if the status was GoodSignature. */
+#if 0
+#warning DEBUG - SecCmsSignerInfoVerifyCertificate trusts everything!
+		if (signerinfo->verificationStatus == SecCmsVSGoodSignature) {
+			 syslog(LOG_ERR, "SecCmsSignerInfoVerifyCertificate ignoring SEC_ERROR_UNTRUSTED_CERT");
+			 rv = SECSuccess;
+		}
+#else
+		if (signerinfo->verificationStatus == SecCmsVSGoodSignature)
+			signerinfo->verificationStatus = SecCmsVSSigningCertNotTrusted;
+#endif
 	}
     }
 
