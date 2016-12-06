@@ -83,7 +83,7 @@ void plen_to_mask(int plen, char *addr) {
 struct ifi_info *get_ifi_info_linuxv6(int family, int doaliases)
 {
     struct ifi_info *ifi, *ifihead, **ifipnext, *ifipold, **ifiptr;
-    FILE *fp;
+    FILE *fp = NULL;
     char addr[8][5];
     int flags, myflags, index, plen, scope;
     char ifname[9], lastname[IFNAMSIZ];
@@ -200,6 +200,9 @@ gotError:
 done:
     if (sockfd != -1) {
         assert(close(sockfd) == 0);
+    }
+    if (fp != NULL) {
+        fclose(fp);
     }
     return(ifihead);    /* pointer to first structure in linked list */
 }
